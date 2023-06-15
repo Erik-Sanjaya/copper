@@ -1,0 +1,3 @@
+# Copper
+
+Minecraft server implementation.
