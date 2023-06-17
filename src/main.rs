@@ -4,8 +4,6 @@ use tokio::{
     net::{TcpListener, TcpStream},
 };
 
-type BytesRead = usize;
-
 #[derive(Debug, Error)]
 enum DecodeVarIntError {
     #[error("Bytes exceeded the limit of VarInt")]
@@ -14,30 +12,36 @@ enum DecodeVarIntError {
     MissingBytes,
 }
 
-fn decode_var_int(mut bytes: &[u8]) -> Result<(i32, BytesRead), DecodeVarIntError> {
-    let mut result = 0;
-    let mut shift = 0;
+type BytesRead = usize;
 
-    loop {
-        if shift >= 32 {
-            return Err(DecodeVarIntError::Overflow);
+struct VarInt(i32);
+
+impl VarInt {
+    fn read_from(mut bytes: &[u8]) -> Result<(i32, BytesRead), DecodeVarIntError> {
+        let mut result = 0;
+        let mut shift = 0;
+
+        loop {
+            if shift >= 32 {
+                return Err(DecodeVarIntError::Overflow);
+            }
+
+            let byte = match bytes.first() {
+                Some(b) => *b,
+                None => return Err(DecodeVarIntError::MissingBytes),
+            };
+
+            bytes = &bytes[1..];
+            result |= ((byte & 0x7F) as i32) << shift;
+            shift += 7;
+
+            if byte & 0x80 == 0 {
+                break;
+            }
         }
 
-        let byte = match bytes.first() {
-            Some(b) => *b,
-            None => return Err(DecodeVarIntError::MissingBytes),
-        };
-
-        bytes = &bytes[1..];
-        result |= ((byte & 0x7F) as i32) << shift;
-        shift += 7;
-
-        if byte & 0x80 == 0 {
-            break;
-        }
+        Ok((result, shift / 7))
     }
-
-    Ok((result, shift / 7))
 }
 
 #[derive(Debug)]
@@ -59,11 +63,11 @@ fn into_uncompressed_dirty(
     mut packet: &[u8],
 ) -> Result<UncompressedPacket, UncompressedPacketError> {
     let (length, length_bytes) =
-        decode_var_int(packet).map_err(UncompressedPacketError::InvalidLength)?;
+        VarInt::read_from(packet).map_err(UncompressedPacketError::InvalidLength)?;
     packet = &packet[length_bytes..];
 
     let (packet_id, packet_id_bytes) =
-        decode_var_int(packet).map_err(UncompressedPacketError::InvalidPacketId)?;
+        VarInt::read_from(packet).map_err(UncompressedPacketError::InvalidPacketId)?;
     packet = &packet[packet_id_bytes..];
 
     Ok(UncompressedPacket {
@@ -73,7 +77,6 @@ fn into_uncompressed_dirty(
     })
 }
 
-#[allow(clippy::unused_io_amount)]
 async fn handle_socket(mut stream: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
     let mut buffer = [0; 128];
     let n = stream.read(&mut buffer[..]).await?;
