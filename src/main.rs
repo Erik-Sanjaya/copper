@@ -1,54 +1,14 @@
-use std::io::{Cursor, Seek};
+mod data_types;
 
+use std::io::Cursor;
+
+use data_types::{VarInt, VarIntError};
 use thiserror::Error;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
 use tracing::{debug, error, info};
-
-#[derive(Debug, Error)]
-enum DecodeVarIntError {
-    #[error("Bytes exceeded the limit of VarInt")]
-    Overflow,
-    #[error("Bytes too short")]
-    MissingBytes,
-}
-
-type BytesRead = usize;
-
-#[derive(Debug)]
-struct VarInt(i32);
-
-impl VarInt {
-    async fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, DecodeVarIntError> {
-        let mut result = 0;
-        let mut shift = 0;
-
-        loop {
-            if shift >= 32 {
-                return Err(DecodeVarIntError::Overflow);
-            }
-
-            let byte = match cursor.read_u8().await {
-                Ok(b) => b,
-                Err(e) => {
-                    error!("{:?}", e);
-                    return Err(DecodeVarIntError::MissingBytes);
-                }
-            };
-
-            result |= ((byte & 0x7F) as i32) << shift;
-            shift += 7;
-
-            if byte & 0x80 == 0 {
-                break;
-            }
-        }
-
-        Ok(Self(result))
-    }
-}
 
 #[derive(Debug)]
 struct UncompressedPacket<'d> {
@@ -60,9 +20,9 @@ struct UncompressedPacket<'d> {
 #[derive(Debug, Error)]
 enum UncompressedPacketError {
     #[error("Packet length is invalid")]
-    InvalidLength(#[source] DecodeVarIntError),
+    InvalidLength(#[source] VarIntError),
     #[error("Packet id is invalid: {0}")]
-    InvalidPacketId(#[source] DecodeVarIntError),
+    InvalidPacketId(#[source] VarIntError),
 }
 
 async fn into_uncompressed_dirty(
