@@ -84,7 +84,13 @@ async fn handle_socket(mut stream: TcpStream) -> anyhow::Result<()> {
     let length = VarInt::read_from(&length_buffer[..])?;
 
     let mut buffer = vec![0; length.0 as usize + length.1];
-    stream.read_exact(&mut buffer[..]).await?;
+    match stream.read_exact(&mut buffer[..]).await {
+        Ok(_) => (),
+        Err(e) => {
+            error!("{:?}", e);
+            info!("Buffer dump: {:?}", buffer);
+        }
+    };
     let packet = into_uncompressed_dirty(&buffer[..]);
 
     debug!("{:?}", buffer);
@@ -97,7 +103,9 @@ async fn handle_socket(mut stream: TcpStream) -> anyhow::Result<()> {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:25565").await?;
-    let subscriber = tracing_subscriber::FmtSubscriber::new();
+    let subscriber = tracing_subscriber::fmt::Subscriber::builder()
+        .with_max_level(tracing::Level::DEBUG)
+        .finish();
 
     tracing::subscriber::set_global_default(subscriber)?;
 
@@ -105,7 +113,10 @@ async fn main() -> anyhow::Result<()> {
         let (stream, addr) = listener.accept().await?;
         tokio::spawn(async move {
             info!("addr: {:?} | Tcp: {:?}", addr, stream);
-            handle_socket(stream).await.unwrap();
+            match handle_socket(stream).await {
+                Ok(_) => (),
+                Err(e) => error!("{:?}", e),
+            };
         })
         .await?;
     }
