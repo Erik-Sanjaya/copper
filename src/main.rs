@@ -78,21 +78,24 @@ fn into_uncompressed_dirty(
 }
 
 async fn handle_socket(mut stream: TcpStream) -> anyhow::Result<()> {
-    let mut buffer = [0; 128];
-    let n = stream.read(&mut buffer[..]).await?;
+    let mut length_buffer = [0; 5];
+    stream.peek(&mut length_buffer[..]).await?;
+    let length = VarInt::read_from(&length_buffer[..])?;
+
+    let mut buffer = vec![0; length.0 as usize + length.1];
+    stream.read_exact(&mut buffer[..]).await?;
     let packet = into_uncompressed_dirty(&buffer[..]);
 
     println!("{:?}", buffer);
     println!("{:?}", packet);
-    // println!("{n}");
 
-    stream.write_all(&buffer[..n]).await?;
+    stream.write_all(&buffer[..]).await?;
     Ok(())
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:80").await?;
+    let listener = TcpListener::bind("127.0.0.1:25565").await?;
 
     loop {
         let (stream, addr) = listener.accept().await?;
