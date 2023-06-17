@@ -3,6 +3,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
+use tracing::{debug, error, info};
 
 #[derive(Debug, Error)]
 enum DecodeVarIntError {
@@ -86,8 +87,8 @@ async fn handle_socket(mut stream: TcpStream) -> anyhow::Result<()> {
     stream.read_exact(&mut buffer[..]).await?;
     let packet = into_uncompressed_dirty(&buffer[..]);
 
-    println!("{:?}", buffer);
-    println!("{:?}", packet);
+    debug!("{:?}", buffer);
+    debug!("{:?}", packet);
 
     stream.write_all(&buffer[..]).await?;
     Ok(())
@@ -96,11 +97,14 @@ async fn handle_socket(mut stream: TcpStream) -> anyhow::Result<()> {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:25565").await?;
+    let subscriber = tracing_subscriber::FmtSubscriber::new();
+
+    tracing::subscriber::set_global_default(subscriber)?;
 
     loop {
         let (stream, addr) = listener.accept().await?;
         tokio::spawn(async move {
-            println!("addr: {:?} | Tcp: {:?}", addr, stream);
+            info!("addr: {:?} | Tcp: {:?}", addr, stream);
             handle_socket(stream).await.unwrap();
         })
         .await?;
