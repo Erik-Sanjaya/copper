@@ -77,7 +77,7 @@ fn into_uncompressed_dirty(
     })
 }
 
-async fn handle_socket(mut stream: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
+async fn handle_socket(mut stream: TcpStream) -> anyhow::Result<()> {
     let mut buffer = [0; 128];
     let n = stream.read(&mut buffer[..]).await?;
     let packet = into_uncompressed_dirty(&buffer[..]);
@@ -91,8 +91,8 @@ async fn handle_socket(mut stream: TcpStream) -> Result<(), Box<dyn std::error::
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let listener = TcpListener::bind("127.0.0.1:25565").await.unwrap();
+async fn main() -> anyhow::Result<()> {
+    let listener = TcpListener::bind("127.0.0.1:80").await?;
 
     loop {
         let (stream, addr) = listener.accept().await?;
