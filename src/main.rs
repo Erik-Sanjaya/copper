@@ -1,3 +1,5 @@
+use std::io::{Cursor, Seek};
+
 use thiserror::Error;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -15,10 +17,11 @@ enum DecodeVarIntError {
 
 type BytesRead = usize;
 
+#[derive(Debug)]
 struct VarInt(i32);
 
 impl VarInt {
-    fn read_from(mut bytes: &[u8]) -> Result<(i32, BytesRead), DecodeVarIntError> {
+    async fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, DecodeVarIntError> {
         let mut result = 0;
         let mut shift = 0;
 
@@ -27,12 +30,14 @@ impl VarInt {
                 return Err(DecodeVarIntError::Overflow);
             }
 
-            let byte = match bytes.first() {
-                Some(b) => *b,
-                None => return Err(DecodeVarIntError::MissingBytes),
+            let byte = match cursor.read_u8().await {
+                Ok(b) => b,
+                Err(e) => {
+                    error!("{:?}", e);
+                    return Err(DecodeVarIntError::MissingBytes);
+                }
             };
 
-            bytes = &bytes[1..];
             result |= ((byte & 0x7F) as i32) << shift;
             shift += 7;
 
@@ -41,14 +46,14 @@ impl VarInt {
             }
         }
 
-        Ok((result, shift / 7))
+        Ok(Self(result))
     }
 }
 
 #[derive(Debug)]
 struct UncompressedPacket<'d> {
-    length: i32,
-    packet_id: i32,
+    length: VarInt,
+    packet_id: VarInt,
     data: &'d [u8],
 }
 
@@ -60,30 +65,32 @@ enum UncompressedPacketError {
     InvalidPacketId(#[source] DecodeVarIntError),
 }
 
-fn into_uncompressed_dirty(
-    mut packet: &[u8],
+async fn into_uncompressed_dirty(
+    packet: &[u8],
 ) -> Result<UncompressedPacket, UncompressedPacketError> {
-    let (length, length_bytes) =
-        VarInt::read_from(packet).map_err(UncompressedPacketError::InvalidLength)?;
-    packet = &packet[length_bytes..];
+    let mut cursor = Cursor::new(packet);
+    let length = VarInt::read(&mut cursor)
+        .await
+        .map_err(UncompressedPacketError::InvalidLength)?;
 
-    let (packet_id, packet_id_bytes) =
-        VarInt::read_from(packet).map_err(UncompressedPacketError::InvalidPacketId)?;
-    packet = &packet[packet_id_bytes..];
+    let packet_id = VarInt::read(&mut cursor)
+        .await
+        .map_err(UncompressedPacketError::InvalidPacketId)?;
 
     Ok(UncompressedPacket {
         length,
         packet_id,
-        data: packet,
+        data: &packet[cursor.position() as usize..],
     })
 }
 
 async fn handle_socket(mut stream: TcpStream) -> anyhow::Result<()> {
     let mut length_buffer = [0; 5];
     stream.peek(&mut length_buffer[..]).await?;
-    let length = VarInt::read_from(&length_buffer[..])?;
+    let mut length_cursor = Cursor::new(&length_buffer[..]);
+    let length = VarInt::read(&mut length_cursor).await?;
 
-    let mut buffer = vec![0; length.0 as usize + length.1];
+    let mut buffer = vec![0; length.0 as usize + length_cursor.position() as usize];
     match stream.read_exact(&mut buffer[..]).await {
         Ok(_) => (),
         Err(e) => {
@@ -91,7 +98,7 @@ async fn handle_socket(mut stream: TcpStream) -> anyhow::Result<()> {
             info!("Buffer dump: {:?}", buffer);
         }
     };
-    let packet = into_uncompressed_dirty(&buffer[..]);
+    let packet = into_uncompressed_dirty(&buffer[..]).await;
 
     debug!("{:?}", buffer);
     debug!("{:?}", packet);
