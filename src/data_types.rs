@@ -43,4 +43,21 @@ impl VarInt {
 
         Ok(Self(result))
     }
+
+    pub async fn write(&self, buffer: &mut Vec<u8>) {
+        let mut value = self.0;
+
+        loop {
+            let mut temp = (value & 0x7f) as u8;
+            value >>= 7;
+
+            if value != 0 {
+                temp |= 0x80;
+                buffer.push(temp);
+            } else {
+                buffer.push(temp);
+                break;
+            }
+        }
+    }
 }
