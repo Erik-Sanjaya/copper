@@ -8,11 +8,14 @@ use serde_json::json;
 use thiserror::Error;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
+    net::{
+        tcp::{ReadHalf, WriteHalf},
+        TcpListener, TcpStream,
+    },
 };
 use tracing::{debug, error, info};
 
-use crate::handshaking::Handshaking;
+use crate::handshaking::{Handshaking, HandshakingNextState};
 
 // This is mostly only used for debugging. Although I doubt it'd be done that
 // many times using this. But I'll keep it anyway
@@ -50,7 +53,7 @@ async fn into_uncompressed_dirty(
     })
 }
 
-async fn stream_into_vec(stream: &mut TcpStream) -> anyhow::Result<Vec<u8>> {
+async fn stream_into_vec(stream: &mut ReadHalf<'_>) -> anyhow::Result<Vec<u8>> {
     let mut length_buffer = [0; 5];
     stream.peek(&mut length_buffer[..]).await?;
     let mut length_cursor = Cursor::new(&length_buffer[..]);
@@ -61,6 +64,7 @@ async fn stream_into_vec(stream: &mut TcpStream) -> anyhow::Result<Vec<u8>> {
         Ok(_) => (),
         Err(e) => {
             error!("{:?}", e);
+            debug!("Buffer length: {:?}", length);
             debug!("Buffer dump: {:?}", buffer);
         }
     };
@@ -68,31 +72,48 @@ async fn stream_into_vec(stream: &mut TcpStream) -> anyhow::Result<Vec<u8>> {
     Ok(buffer)
 }
 
-async fn handle_socket(mut stream: TcpStream) -> anyhow::Result<()> {
-    let buffer = stream_into_vec(&mut stream).await?;
-    let mut cursor = Cursor::new(buffer.as_slice());
-    let handshake = Handshaking::read(&mut cursor).await?;
-    // let packet = into_uncompressed_dirty(&buffer[..]).await;
+enum State {
+    Handshaking,
+    Status,
+    Login,
+    Play,
+}
 
-    debug!("{:?}", buffer);
+async fn handle_handshaking(
+    cursor: &mut Cursor<&[u8]>,
+    state: &mut State,
+) -> anyhow::Result<Handshaking> {
+    let handshake = Handshaking::read(cursor).await?;
     debug!("{:?}", handshake);
 
-    // TODO: implement all of these into actual struct.
+    match handshake.next_state {
+        HandshakingNextState::Status => *state = State::Status,
+        HandshakingNextState::Login => *state = State::Login,
+    }
+
+    Ok(handshake)
+}
+
+async fn handle_status(
+    cursor: &mut Cursor<&[u8]>,
+    writer: &mut WriteHalf<'_>,
+    state: &mut State,
+) -> anyhow::Result<()> {
     let mut response_buffer_test = vec![];
 
     let dummy_json_string = json!({
-        "version": {
-            "name": "1",
-            "protocol": 764
-        },
-        "players": {
-            "max": 100,
-            "online": 5,
-            "sample": [
-                {
-                    "name": "thinkofdeath",
-                    "id": "4566e69f-c907-48ee-8d71-d7ba5aa00d20"
-                }
+    "version": {
+        "name": "1",
+        "protocol": 764
+    },
+    "players": {
+        "max": 100,
+        "online": 5,
+        "sample": [
+            {
+                "name": "thinkofdeath",
+                "id": "4566e69f-c907-48ee-8d71-d7ba5aa00d20"
+            }
             ]
         },
         "description": {
@@ -104,8 +125,6 @@ async fn handle_socket(mut stream: TcpStream) -> anyhow::Result<()> {
     })
     .to_string();
 
-    // packet length, 3 is hardcoded from 1 byte for packet id and 2 bytes for
-    // string length (VarInt)
     VarInt(3 + dummy_json_string.len() as i32)
         .write(&mut response_buffer_test)
         .await;
@@ -119,9 +138,74 @@ async fn handle_socket(mut stream: TcpStream) -> anyhow::Result<()> {
 
     response_buffer_test.extend_from_slice(dummy_json_string.as_bytes());
 
-    stream.write_all(&response_buffer_test).await?;
-    debug!("WROTE DUMMY JSON RESPONSE: {:?}", response_buffer_test);
+    writer.write_all(&response_buffer_test).await?;
+
     Ok(())
+}
+
+async fn handle_login(
+    cursor: &mut Cursor<&[u8]>,
+    writer: &mut WriteHalf<'_>,
+    state: &mut State,
+) -> anyhow::Result<()> {
+    // TODO: implement all of these into actual struct.
+    let mut reply: Vec<u8> = vec![];
+
+    let reply_json = json!({
+        "text": "WIP",
+
+    })
+    .to_string();
+
+    VarInt(2 + reply_json.len() as i32).write(&mut reply).await;
+
+    // packet id
+    VarInt(0).write(&mut reply).await;
+
+    VarInt(reply_json.len() as i32).write(&mut reply).await;
+
+    reply.extend_from_slice(reply_json.as_bytes());
+
+    writer.write_all(&reply).await?;
+    info!("WRITE LOGIN REPLY");
+    writer.shutdown().await?;
+
+    Ok(())
+}
+
+async fn handle_socket(mut stream: TcpStream) -> anyhow::Result<()> {
+    let (mut reader, mut writer) = stream.split();
+    let mut state = State::Handshaking;
+
+    loop {
+        reader.readable().await?;
+
+        let buffer = stream_into_vec(&mut reader).await?;
+
+        debug!("{:?}", buffer);
+
+        let mut cursor = Cursor::new(buffer.as_slice());
+
+        match state {
+            State::Handshaking => {
+                let _ = handle_handshaking(&mut cursor, &mut state).await?;
+            }
+            State::Status => {
+                let _ = handle_status(&mut cursor, &mut writer, &mut state).await?;
+            }
+            State::Login => {
+                let _ = handle_login(&mut cursor, &mut writer, &mut state).await?;
+            }
+            State::Play => {
+                info!("ENTERING PLAY STATE");
+            }
+        };
+
+        // let packet = into_uncompressed_dirty(&buffer[..]).await;
+
+        // writer.write_all(&response_buffer_test).await?;
+        // Ok(())
+    }
 }
 
 #[tokio::main]
@@ -129,6 +213,8 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:25565").await?;
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_max_level(tracing::Level::DEBUG)
+        .with_file(true)
+        .with_line_number(true)
         .finish();
 
     tracing::subscriber::set_global_default(subscriber)?;

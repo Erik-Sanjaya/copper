@@ -11,11 +11,11 @@ pub struct Handshaking {
     protocol_version: VarInt,
     server_address: String,
     server_port: u16,
-    next_state: HandshakingNextState,
+    pub next_state: HandshakingNextState,
 }
 
 #[derive(Debug)]
-enum HandshakingNextState {
+pub enum HandshakingNextState {
     Status = 1,
     Login = 2,
 }
