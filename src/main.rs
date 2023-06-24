@@ -125,17 +125,15 @@ async fn handle_status(
     })
     .to_string();
 
-    VarInt(3 + dummy_json_string.len() as i32)
-        .write(&mut response_buffer_test)
-        .await;
+    let packet_id = VarInt(0);
+    let string_len = VarInt(dummy_json_string.len() as i32);
+    let packet_len =
+        VarInt((packet_id.size() + string_len.size() + dummy_json_string.len()) as i32);
 
-    // packet id
-    VarInt(0).write(&mut response_buffer_test).await;
+    packet_len.write(&mut response_buffer_test).await;
+    packet_id.write(&mut response_buffer_test).await;
 
-    VarInt(dummy_json_string.len() as i32)
-        .write(&mut response_buffer_test)
-        .await;
-
+    string_len.write(&mut response_buffer_test).await;
     response_buffer_test.extend_from_slice(dummy_json_string.as_bytes());
 
     writer.write_all(&response_buffer_test).await?;
@@ -157,13 +155,14 @@ async fn handle_login(
     })
     .to_string();
 
-    VarInt(2 + reply_json.len() as i32).write(&mut reply).await;
+    let packet_id = VarInt(0);
+    let string_len = VarInt(reply_json.len() as i32);
+    let packet_len = VarInt((packet_id.size() + string_len.size() + reply_json.len()) as i32);
 
-    // packet id
-    VarInt(0).write(&mut reply).await;
+    packet_len.write(&mut reply).await;
+    packet_id.write(&mut reply).await;
 
-    VarInt(reply_json.len() as i32).write(&mut reply).await;
-
+    string_len.write(&mut reply).await;
     reply.extend_from_slice(reply_json.as_bytes());
 
     writer.write_all(&reply).await?;
@@ -200,11 +199,6 @@ async fn handle_socket(mut stream: TcpStream) -> anyhow::Result<()> {
                 info!("ENTERING PLAY STATE");
             }
         };
-
-        // let packet = into_uncompressed_dirty(&buffer[..]).await;
-
-        // writer.write_all(&response_buffer_test).await?;
-        // Ok(())
     }
 }
 

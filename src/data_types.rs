@@ -60,4 +60,19 @@ impl VarInt {
             }
         }
     }
+
+    pub fn size(&self) -> usize {
+        let mut value = self.0;
+        let mut size = 0;
+
+        loop {
+            value >>= 7;
+            size += 1;
+            if value == 0 {
+                break;
+            }
+        }
+
+        size
+    }
 }
