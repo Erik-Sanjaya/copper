@@ -1,10 +1,12 @@
 mod data_types;
 mod handshaking;
+mod status;
 
-use std::io::Cursor;
+use std::{io::Cursor, time::Duration};
 
 use data_types::{VarInt, VarIntError};
 use serde_json::json;
+use status::Status;
 use thiserror::Error;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -12,50 +14,16 @@ use tokio::{
         tcp::{ReadHalf, WriteHalf},
         TcpListener, TcpStream,
     },
+    time::timeout,
 };
 use tracing::{debug, error, info};
 
 use crate::handshaking::{Handshaking, HandshakingNextState};
 
-// This is mostly only used for debugging. Although I doubt it'd be done that
-// many times using this. But I'll keep it anyway
-#[derive(Debug)]
-struct UncompressedPacket<'d> {
-    length: VarInt,
-    packet_id: VarInt,
-    data: &'d [u8],
-}
-
-#[derive(Debug, Error)]
-enum UncompressedPacketError {
-    #[error("Packet length is invalid")]
-    InvalidLength(#[source] VarIntError),
-    #[error("Packet id is invalid: {0}")]
-    InvalidPacketId(#[source] VarIntError),
-}
-
-async fn into_uncompressed_dirty(
-    packet: &[u8],
-) -> Result<UncompressedPacket, UncompressedPacketError> {
-    let mut cursor = Cursor::new(packet);
-    let length = VarInt::read(&mut cursor)
-        .await
-        .map_err(UncompressedPacketError::InvalidLength)?;
-
-    let packet_id = VarInt::read(&mut cursor)
-        .await
-        .map_err(UncompressedPacketError::InvalidPacketId)?;
-
-    Ok(UncompressedPacket {
-        length,
-        packet_id,
-        data: &packet[cursor.position() as usize..],
-    })
-}
-
 async fn stream_into_vec(stream: &mut ReadHalf<'_>) -> anyhow::Result<Vec<u8>> {
     let mut length_buffer = [0; 5];
     stream.peek(&mut length_buffer[..]).await?;
+
     let mut length_cursor = Cursor::new(&length_buffer[..]);
     let length = VarInt::read(&mut length_cursor).await?;
 
@@ -65,13 +33,14 @@ async fn stream_into_vec(stream: &mut ReadHalf<'_>) -> anyhow::Result<Vec<u8>> {
         Err(e) => {
             error!("{:?}", e);
             debug!("Buffer length: {:?}", length);
-            debug!("Buffer dump: {:?}", buffer);
+            return Err(e.into());
         }
     };
 
     Ok(buffer)
 }
 
+#[derive(Debug)]
 enum State {
     Handshaking,
     Status,
@@ -97,48 +66,11 @@ async fn handle_handshaking(
 async fn handle_status(
     cursor: &mut Cursor<&[u8]>,
     writer: &mut WriteHalf<'_>,
-    state: &mut State,
-) -> anyhow::Result<()> {
-    let mut response_buffer_test = vec![];
+) -> anyhow::Result<Status> {
+    let status = Status::read(cursor).await?;
+    status.write(writer).await?;
 
-    let dummy_json_string = json!({
-    "version": {
-        "name": "1",
-        "protocol": 764
-    },
-    "players": {
-        "max": 100,
-        "online": 5,
-        "sample": [
-            {
-                "name": "thinkofdeath",
-                "id": "4566e69f-c907-48ee-8d71-d7ba5aa00d20"
-            }
-            ]
-        },
-        "description": {
-            "text": "Hello world"
-        },
-        "favicon": "data:image/png;base64,<data>",
-        "enforcesSecureChat": true,
-        "previewsChat": true
-    })
-    .to_string();
-
-    let packet_id = VarInt(0);
-    let string_len = VarInt(dummy_json_string.len() as i32);
-    let packet_len =
-        VarInt((packet_id.size() + string_len.size() + dummy_json_string.len()) as i32);
-
-    packet_len.write(&mut response_buffer_test).await;
-    packet_id.write(&mut response_buffer_test).await;
-
-    string_len.write(&mut response_buffer_test).await;
-    response_buffer_test.extend_from_slice(dummy_json_string.as_bytes());
-
-    writer.write_all(&response_buffer_test).await?;
-
-    Ok(())
+    Ok(status)
 }
 
 async fn handle_login(
@@ -187,10 +119,12 @@ async fn handle_socket(mut stream: TcpStream) -> anyhow::Result<()> {
 
         match state {
             State::Handshaking => {
-                let _ = handle_handshaking(&mut cursor, &mut state).await?;
+                let handshake = handle_handshaking(&mut cursor, &mut state).await?;
+                info!("Handshake processed: {:?}", handshake);
             }
             State::Status => {
-                let _ = handle_status(&mut cursor, &mut writer, &mut state).await?;
+                let status = handle_status(&mut cursor, &mut writer).await?;
+                info!("Status processed: {:?}", status);
             }
             State::Login => {
                 let _ = handle_login(&mut cursor, &mut writer, &mut state).await?;
