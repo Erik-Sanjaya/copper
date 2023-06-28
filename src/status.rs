@@ -4,10 +4,10 @@ use std::{
 };
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use serde_json::json;
 use tracing::debug;
 
 use crate::data_types::{VarInt, VarIntError};
+use crate::server_status::ServerStatus;
 use thiserror::Error;
 
 #[derive(Debug)]
@@ -74,40 +74,21 @@ impl Status {
 
         match self.packet_id {
             StatusPacketId::Status => {
-                // pretend that this is serialized from an actual server status.
-                let dummy_json_string = json!({
-                "version": {
-                    "name": "1.19.4",
-                    "protocol": 763
-                },
-                "players": {
-                    "max": 100,
-                    "online": 5,
-                    "sample": [
-                        {
-                            "name": "thinkofdeath",
-                            "id": "4566e69f-c907-48ee-8d71-d7ba5aa00d20"
-                        }
-                    ]
-                },
-                "description": {
-                    "text": "Hello world"
-                },
-                })
-                .to_string();
+                let server_status = ServerStatus::get_example();
+                let server_status_as_vec = serde_json::to_vec(&server_status).unwrap();
 
-                let string_len = VarInt(dummy_json_string.len() as i32);
+                let string_len = VarInt(server_status_as_vec.len() as i32);
                 let packet_len = VarInt(
                     (self.packet_id.to_varint().size()
                         + string_len.size()
-                        + dummy_json_string.len()) as i32,
+                        + server_status_as_vec.len()) as i32,
                 );
 
                 packet_len.write(&mut response);
                 packet_id_as_varint.write(&mut response);
 
                 string_len.write(&mut response);
-                response.extend_from_slice(dummy_json_string.as_bytes());
+                response.extend_from_slice(server_status_as_vec.as_ref());
             }
             StatusPacketId::Ping => {
                 let payload = self.payload.ok_or(StatusError::MissingPayload)?;

@@ -1,24 +1,20 @@
 mod data_types;
 mod handshaking;
+mod server_status;
 mod status;
 
 use std::{
     io::{Cursor, Read, Write},
     net::{Shutdown, SocketAddr, TcpListener, TcpStream},
-    time::Duration,
 };
 
 use anyhow::anyhow;
-use data_types::{VarInt, VarIntError};
+use data_types::VarInt;
 use serde_json::json;
 use status::Status;
-use thiserror::Error;
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use crate::{
-    handshaking::{Handshaking, HandshakingNextState},
-    status::StatusPacketId,
-};
+use crate::handshaking::{Handshaking, HandshakingNextState};
 
 fn stream_into_vec(stream: &mut TcpStream) -> anyhow::Result<Vec<u8>> {
     let mut length_buffer = [0; 5];
