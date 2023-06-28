@@ -4,15 +4,16 @@ mod status;
 
 use std::{
     io::{Cursor, Read, Write},
-    net::{Shutdown, TcpListener, TcpStream},
+    net::{Shutdown, SocketAddr, TcpListener, TcpStream},
     time::Duration,
 };
 
+use anyhow::anyhow;
 use data_types::{VarInt, VarIntError};
 use serde_json::json;
 use status::Status;
 use thiserror::Error;
-use tracing::{debug, error, info, instrument::WithSubscriber, trace, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
     handshaking::{Handshaking, HandshakingNextState},
@@ -21,7 +22,11 @@ use crate::{
 
 fn stream_into_vec(stream: &mut TcpStream) -> anyhow::Result<Vec<u8>> {
     let mut length_buffer = [0; 5];
-    stream.peek(&mut length_buffer[..])?;
+    let size_peeked = stream.peek(&mut length_buffer[..])?;
+    if size_peeked == 0 {
+        trace!("size_peeked is 0, most likely EOF");
+        return Err(anyhow!("amount of bytes peeked is 0"));
+    }
 
     let mut length_cursor = Cursor::new(&length_buffer[..]);
     let length = VarInt::read(&mut length_cursor)?;
@@ -101,28 +106,32 @@ fn handle_login(
     Ok(())
 }
 
-fn handle_socket(mut stream: TcpStream) -> anyhow::Result<()> {
+fn handle_socket(mut stream: TcpStream, addr: SocketAddr) -> anyhow::Result<()> {
     let mut state = State::Handshaking;
 
     loop {
-        trace!("state: {:?}", state);
+        trace!("State of {}: {:?}", addr, state);
         let buffer = stream_into_vec(&mut stream)?;
 
-        debug!("Buffer from stream: {:?}", buffer);
+        debug!("Buffer from {}: {:?}", addr, buffer);
 
         let mut cursor = Cursor::new(buffer.as_slice());
 
         match state {
             State::Handshaking => {
                 let handshake = handle_handshaking(&mut cursor, &mut state)?;
-                info!("Handshake processed: {:?}", handshake);
+                info!("Handshake processed from {}", addr);
+                trace!("{} | {:?}", addr, handshake);
             }
             State::Status => {
                 let status = handle_status(&mut cursor, &mut stream)?;
-                info!("Status processed: {:?}", status);
+                info!("Status processed from {}", addr);
+                trace!("{} | {:?}", addr, status);
             }
             State::Login => {
-                let _ = handle_login(&mut cursor, &mut stream, &mut state)?;
+                let login = handle_login(&mut cursor, &mut stream, &mut state)?;
+                info!("Login processed from {}", addr);
+                trace!("{} | {:?}", addr, login);
             }
             State::Play => {
                 info!("ENTERING PLAY STATE");
@@ -147,7 +156,7 @@ fn main() -> anyhow::Result<()> {
     while let Ok((stream, addr)) = listener.accept() {
         info!("Connection made with {addr}");
         trace!("{stream:?}");
-        match handle_socket(stream) {
+        match handle_socket(stream, addr) {
             Ok(_) => (),
             Err(e) => warn!("Socket handling failed: {e}"),
         };
