@@ -63,7 +63,11 @@ impl Status {
             Ok(VarInt(n)) => Err(StatusError::PacketId(PacketIdError::InvalidType(n))),
         }?;
 
-        let payload = cursor.read_u64::<BigEndian>().ok();
+        // in the case that read_u64 accidentally read false data.
+        let payload = match packet_id {
+            StatusPacketId::Status => None,
+            StatusPacketId::Ping => cursor.read_u64::<BigEndian>().ok(),
+        };
 
         Ok(Status { packet_id, payload })
     }
