@@ -1,10 +1,11 @@
-use std::io::Cursor;
-
-use serde_json::json;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::tcp::WriteHalf,
+use std::{
+    io::{Cursor, Write},
+    net::TcpStream,
 };
+
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use serde_json::json;
+use tracing::debug;
 
 use crate::data_types::{VarInt, VarIntError};
 use thiserror::Error;
@@ -53,21 +54,21 @@ pub enum PacketIdError {
 const U64_SIZE_IN_BYTES: usize = 8;
 
 impl Status {
-    pub async fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, StatusError> {
-        let _length = VarInt::read(cursor).await.map_err(StatusError::Length)?;
-        let packet_id = match VarInt::read(cursor).await {
+    pub fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, StatusError> {
+        let _length = VarInt::read(cursor).map_err(StatusError::Length)?;
+        let packet_id = match VarInt::read(cursor) {
             Ok(VarInt(0x00)) => Ok(StatusPacketId::Status),
             Ok(VarInt(0x01)) => Ok(StatusPacketId::Ping),
             Err(e) => Err(StatusError::PacketId(PacketIdError::Parse(e))),
             Ok(VarInt(n)) => Err(StatusError::PacketId(PacketIdError::InvalidType(n))),
         }?;
 
-        let payload = cursor.read_u64().await.ok();
+        let payload = cursor.read_u64::<BigEndian>().ok();
 
         Ok(Status { packet_id, payload })
     }
 
-    pub async fn write(&self, writer: &mut WriteHalf<'_>) -> Result<usize, StatusError> {
+    pub fn write(&self, writer: &mut TcpStream) -> Result<usize, StatusError> {
         let mut response = vec![];
         let packet_id_as_varint = self.packet_id.to_varint();
 
@@ -102,10 +103,10 @@ impl Status {
                         + dummy_json_string.len()) as i32,
                 );
 
-                packet_len.write(&mut response).await;
-                packet_id_as_varint.write(&mut response).await;
+                packet_len.write(&mut response);
+                packet_id_as_varint.write(&mut response);
 
-                string_len.write(&mut response).await;
+                string_len.write(&mut response);
                 response.extend_from_slice(dummy_json_string.as_bytes());
             }
             StatusPacketId::Ping => {
@@ -113,19 +114,17 @@ impl Status {
 
                 let packet_len = VarInt((packet_id_as_varint.size() + U64_SIZE_IN_BYTES) as i32);
 
-                packet_len.write(&mut response).await;
-                packet_id_as_varint.write(&mut response).await;
+                packet_len.write(&mut response);
+                packet_id_as_varint.write(&mut response);
                 response
-                    .write_u64(payload)
-                    .await
+                    .write_u64::<BigEndian>(payload)
                     .map_err(StatusError::IOError)?;
             }
         }
 
-        writer
-            .write_all(&response)
-            .await
-            .map_err(StatusError::IOError)?;
+        writer.write_all(&response).map_err(StatusError::IOError)?;
+
+        debug!("Response written: {:?}", response);
 
         Ok(response.len())
     }

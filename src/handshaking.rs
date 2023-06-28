@@ -1,7 +1,10 @@
-use std::{io::Cursor, string::FromUtf8Error};
+use std::{
+    io::{Cursor, Read},
+    string::FromUtf8Error,
+};
 
+use byteorder::{BigEndian, ReadBytesExt};
 use thiserror::Error;
-use tokio::io::AsyncReadExt;
 
 use crate::data_types::{VarInt, VarIntError};
 
@@ -55,28 +58,20 @@ pub enum NextStateError {
 }
 
 impl Handshaking {
-    pub async fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, HandshakingError> {
-        let _length = VarInt::read(cursor)
-            .await
-            .map_err(HandshakingError::Length)?;
+    pub fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, HandshakingError> {
+        let _length = VarInt::read(cursor).map_err(HandshakingError::Length)?;
 
-        let packet_id = VarInt::read(cursor)
-            .await
-            .map_err(HandshakingError::PacketId)?;
+        let packet_id = VarInt::read(cursor).map_err(HandshakingError::PacketId)?;
 
-        let protocol_version = VarInt::read(cursor)
-            .await
-            .map_err(HandshakingError::ProtocolVersion)?;
+        let protocol_version = VarInt::read(cursor).map_err(HandshakingError::ProtocolVersion)?;
 
         let server_address = {
             let server_addr_len = VarInt::read(cursor)
-                .await
                 .map_err(ServerAddressError::Length)
                 .map_err(HandshakingError::ServerAddress)?;
             let mut server_addr_buffer = vec![0; server_addr_len.0 as usize];
             cursor
                 .read_exact(&mut server_addr_buffer)
-                .await
                 .map_err(ServerAddressError::MissingBytes)
                 .map_err(HandshakingError::ServerAddress)?;
 
@@ -86,12 +81,10 @@ impl Handshaking {
         };
 
         let server_port = cursor
-            .read_u16()
-            .await
+            .read_u16::<BigEndian>()
             .map_err(HandshakingError::ServerPort)?;
 
         let next_state = match VarInt::read(cursor)
-            .await
             .map_err(NextStateError::Parse)
             .map_err(HandshakingError::NextState)?
         {

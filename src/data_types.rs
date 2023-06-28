@@ -1,7 +1,7 @@
 use std::io::Cursor;
 
+use byteorder::ReadBytesExt;
 use thiserror::Error;
-use tokio::io::AsyncReadExt;
 use tracing::error;
 
 #[derive(Debug, Error)]
@@ -16,7 +16,7 @@ pub enum VarIntError {
 pub struct VarInt(pub i32);
 
 impl VarInt {
-    pub async fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, VarIntError> {
+    pub fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, VarIntError> {
         let mut result = 0;
         let mut shift = 0;
 
@@ -25,7 +25,7 @@ impl VarInt {
                 return Err(VarIntError::Overflow);
             }
 
-            let byte = match cursor.read_u8().await {
+            let byte = match cursor.read_u8() {
                 Ok(b) => b,
                 Err(e) => {
                     error!("{:?}", e);
@@ -44,7 +44,7 @@ impl VarInt {
         Ok(Self(result))
     }
 
-    pub async fn write(&self, buffer: &mut Vec<u8>) {
+    pub fn write(&self, buffer: &mut Vec<u8>) {
         let mut value = self.0;
 
         loop {
