@@ -6,7 +6,10 @@ use std::{
 use byteorder::{BigEndian, ReadBytesExt};
 use thiserror::Error;
 
-use crate::data_types::{VarInt, VarIntError};
+use crate::{
+    data_types::{VarInt, VarIntError},
+    ProtocolError,
+};
 
 #[derive(Debug)]
 pub struct Handshaking {
@@ -24,32 +27,6 @@ pub enum HandshakingNextState {
 }
 
 #[derive(Debug, Error)]
-pub enum HandshakingError {
-    #[error("Packet length is invalid: {0}")]
-    Length(#[source] VarIntError),
-    #[error("Packet id is invalid: {0}")]
-    PacketId(#[source] VarIntError),
-    #[error("Protocol version is invalid: {0}")]
-    ProtocolVersion(#[source] VarIntError),
-    #[error("Error with server address: {0}")]
-    ServerAddress(#[source] ServerAddressError),
-    #[error("Server port is invalid: {0}")]
-    ServerPort(#[source] std::io::Error),
-    #[error("Error with next state: {0}")]
-    NextState(#[source] NextStateError),
-}
-
-#[derive(Debug, Error)]
-pub enum ServerAddressError {
-    #[error("Invalid server address length: {0}")]
-    Length(#[source] VarIntError),
-    #[error("Server address is missing bytes: {0}")]
-    MissingBytes(#[source] std::io::Error),
-    #[error("Server address is invalid: {0}")]
-    Parsing(#[source] FromUtf8Error),
-}
-
-#[derive(Debug, Error)]
 pub enum NextStateError {
     #[error("Packet length is invalid: {0}")]
     Parse(#[source] VarIntError),
@@ -58,38 +35,29 @@ pub enum NextStateError {
 }
 
 impl Handshaking {
-    pub fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, HandshakingError> {
-        let packet_id = VarInt::read_from(cursor).map_err(HandshakingError::PacketId)?;
+    pub fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, ProtocolError> {
+        let packet_id = VarInt::read_from(cursor)?;
 
-        let protocol_version =
-            VarInt::read_from(cursor).map_err(HandshakingError::ProtocolVersion)?;
+        let protocol_version = VarInt::read_from(cursor)?;
 
         let server_address = {
-            let server_addr_len = VarInt::read_from(cursor)
-                .map_err(ServerAddressError::Length)
-                .map_err(HandshakingError::ServerAddress)?;
+            let server_addr_len = VarInt::read_from(cursor)?;
             let mut server_addr_buffer = vec![0; server_addr_len.0 as usize];
             cursor
                 .read_exact(&mut server_addr_buffer)
-                .map_err(ServerAddressError::MissingBytes)
-                .map_err(HandshakingError::ServerAddress)?;
+                .map_err(ProtocolError::IOError)?;
 
-            String::from_utf8(server_addr_buffer)
-                .map_err(ServerAddressError::Parsing)
-                .map_err(HandshakingError::ServerAddress)?
+            String::from_utf8(server_addr_buffer).map_err(|_| ProtocolError::Malformed)?
         };
 
         let server_port = cursor
             .read_u16::<BigEndian>()
-            .map_err(HandshakingError::ServerPort)?;
+            .map_err(ProtocolError::IOError)?;
 
-        let next_state = match VarInt::read_from(cursor)
-            .map_err(NextStateError::Parse)
-            .map_err(HandshakingError::NextState)?
-        {
+        let next_state = match VarInt::read_from(cursor)? {
             VarInt(1) => HandshakingNextState::Status,
             VarInt(2) => HandshakingNextState::Login,
-            VarInt(n) => return Err(HandshakingError::NextState(NextStateError::InvalidType(n))),
+            VarInt(_) => return Err(ProtocolError::Malformed),
         };
 
         Ok(Handshaking {

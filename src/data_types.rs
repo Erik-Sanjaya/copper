@@ -7,6 +7,8 @@ use byteorder::ReadBytesExt;
 use thiserror::Error;
 use tracing::error;
 
+use crate::ProtocolError;
+
 #[derive(Debug, Error)]
 pub enum VarIntError {
     #[error("Bytes exceeded the limit of VarInt")]
@@ -19,20 +21,20 @@ pub enum VarIntError {
 pub struct VarInt(pub i32);
 
 impl VarInt {
-    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, VarIntError> {
+    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
         let mut result = 0;
         let mut shift = 0;
 
         loop {
             if shift >= 32 {
-                return Err(VarIntError::Overflow);
+                return Err(ProtocolError::Malformed);
             }
 
             let byte = match reader.read_u8() {
                 Ok(b) => b,
                 Err(e) => {
                     error!("{:?}", e);
-                    return Err(VarIntError::MissingBytes);
+                    return Err(ProtocolError::Missing);
                 }
             };
 
@@ -85,26 +87,14 @@ pub struct ProtocolString {
     pub string: String,
 }
 
-#[derive(Debug, Error)]
-pub enum ProtocolStringError {
-    #[error("Packet length is invalid: {0}")]
-    Length(#[source] VarIntError),
-    #[error("Error with packet id: {0}")]
-    PacketId(#[source] VarIntError),
-    #[error("I/O error")]
-    IOError(#[source] std::io::Error),
-    #[error("Error parsing string from Utf8")]
-    FromUtf8(#[source] FromUtf8Error),
-}
-
 impl ProtocolString {
-    pub fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, ProtocolStringError> {
-        let length = VarInt::read_from(cursor).map_err(ProtocolStringError::Length)?;
+    pub fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, ProtocolError> {
+        let length = VarInt::read_from(cursor)?;
         let mut vec = vec![0; length.0 as usize];
         cursor
             .read_exact(&mut vec[..])
-            .map_err(ProtocolStringError::IOError)?;
-        let string = String::from_utf8(vec).map_err(ProtocolStringError::FromUtf8)?;
+            .map_err(ProtocolError::IOError)?;
+        let string = String::from_utf8(vec).map_err(|_| ProtocolError::Malformed)?;
 
         Ok(Self { length, string })
     }

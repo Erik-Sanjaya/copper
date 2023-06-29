@@ -6,8 +6,11 @@ use std::{
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use tracing::debug;
 
-use crate::data_types::{ProtocolString, VarInt, VarIntError};
 use crate::server_status::ServerStatus;
+use crate::{
+    data_types::{ProtocolString, VarInt, VarIntError},
+    ProtocolError,
+};
 use thiserror::Error;
 
 #[derive(Debug)]
@@ -31,47 +34,31 @@ impl StatusPacketId {
     }
 }
 
-#[derive(Debug, Error)]
-pub enum StatusError {
-    #[error("Packet length is invalid: {0}")]
-    Length(#[source] VarIntError),
-    #[error("Error with packet id: {0}")]
-    PacketId(#[source] PacketIdError),
-    #[error("Missing payload")]
-    MissingPayload,
-    #[error("I/O error")]
-    IOError(#[source] std::io::Error),
-}
-
-#[derive(Debug, Error)]
-pub enum PacketIdError {
-    #[error("Packet id is invalid: {0}")]
-    Parse(#[source] VarIntError),
-    #[error("There is no status with packet id: {0}")]
-    InvalidType(i32),
-}
-
 const U64_SIZE_IN_BYTES: usize = 8;
 
 impl Status {
-    pub fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, StatusError> {
+    pub fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, ProtocolError> {
         let packet_id = match VarInt::read_from(cursor) {
             Ok(VarInt(0x00)) => Ok(StatusPacketId::Status),
             Ok(VarInt(0x01)) => Ok(StatusPacketId::Ping),
-            Err(e) => Err(StatusError::PacketId(PacketIdError::Parse(e))),
-            Ok(VarInt(n)) => Err(StatusError::PacketId(PacketIdError::InvalidType(n))),
+            Err(e) => Err(ProtocolError::Malformed),
+            Ok(VarInt(n)) => Err(ProtocolError::PacketId(n)),
         }?;
 
         // in the case that read_u64 accidentally read false data.
         let payload = match packet_id {
             StatusPacketId::Status => None,
-            StatusPacketId::Ping => cursor.read_u64::<BigEndian>().ok(),
+            StatusPacketId::Ping => Some(
+                cursor
+                    .read_u64::<BigEndian>()
+                    .map_err(ProtocolError::IOError)?,
+            ),
         };
 
         Ok(Status { packet_id, payload })
     }
 
-    pub fn write(&self, writer: &mut TcpStream) -> Result<usize, StatusError> {
+    pub fn write(&self, writer: &mut TcpStream) -> Result<usize, ProtocolError> {
         let mut response = vec![];
         let packet_id_as_varint = self.packet_id.to_varint();
 
@@ -92,7 +79,7 @@ impl Status {
                 status_as_protocol_string.write(&mut response);
             }
             StatusPacketId::Ping => {
-                let payload = self.payload.ok_or(StatusError::MissingPayload)?;
+                let payload = self.payload.ok_or(ProtocolError::Missing)?;
 
                 let packet_len = VarInt((packet_id_as_varint.size() + U64_SIZE_IN_BYTES) as i32);
 
@@ -100,11 +87,13 @@ impl Status {
                 packet_id_as_varint.write_to(&mut response);
                 response
                     .write_u64::<BigEndian>(payload)
-                    .map_err(StatusError::IOError)?;
+                    .map_err(ProtocolError::IOError)?;
             }
         }
 
-        writer.write_all(&response).map_err(StatusError::IOError)?;
+        writer
+            .write_all(&response)
+            .map_err(ProtocolError::IOError)?;
 
         debug!("Response written: {:?}", response);
 

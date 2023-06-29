@@ -1,6 +1,7 @@
 mod data_types;
 mod handshaking;
 mod login;
+mod packet;
 mod server_status;
 mod status;
 
@@ -10,13 +11,32 @@ use std::{
 };
 
 use anyhow::anyhow;
-use data_types::VarInt;
+use data_types::{VarInt, VarIntError};
 use serde_json::json;
 use status::Status;
+use thiserror::Error;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::handshaking::{Handshaking, HandshakingNextState};
 
+#[derive(Debug, Error)]
+pub enum ProtocolError {
+    /// There's no packet id that matches the one given
+    #[error("Packet id doesn't have the type: {0}")]
+    PacketId(i32),
+    /// Usually when parsing stuff, if there's a case of missing bytes, it should give back this error
+    #[error("Missing data")]
+    Missing,
+    /// When the parsing simply fails or have unexpected value
+    #[error("Malformed data")]
+    Malformed,
+    #[error("IO error")]
+    /// Any error coming from std::io::Error
+    IOError(#[source] std::io::Error),
+    /// For features that have not been implemented yet.
+    #[error("Unimplemented")]
+    Unimplemented,
+}
 fn stream_into_vec(stream: &mut TcpStream) -> anyhow::Result<Vec<u8>> {
     // TODO: handle legacy server ping list https://wiki.vg/Server_List_Ping#1.6
     // cancer part is that it doesn't have a length prefixed. actually breaking

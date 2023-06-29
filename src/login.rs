@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::{
     data_types::{VarInt, VarIntError},
-    status::PacketIdError,
+    ProtocolError,
 };
 
 // 1. C→S: Handshake with Next State set to 2 (login)
@@ -22,17 +22,9 @@ pub struct LoginStart {
     player_uuid: Option<Uuid>,
 }
 
-#[derive(Debug, Error)]
-enum LoginStartError {
-    #[error("Packet length is invalid: {0}")]
-    Length(#[source] VarIntError),
-    #[error("Error with packet id: {0}")]
-    PacketId(#[source] VarIntError),
-}
-
 impl LoginStart {
-    fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, LoginStartError> {
-        let packet_id = VarInt::read_from(cursor).map_err(LoginStartError::PacketId)?;
+    fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, ProtocolError> {
+        let packet_id = VarInt::read_from(cursor)?;
 
         Ok(LoginStart {
             name: "".to_owned(),
