@@ -59,14 +59,13 @@ pub enum NextStateError {
 
 impl Handshaking {
     pub fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, HandshakingError> {
-        let _length = VarInt::read(cursor).map_err(HandshakingError::Length)?;
+        let packet_id = VarInt::read_from(cursor).map_err(HandshakingError::PacketId)?;
 
-        let packet_id = VarInt::read(cursor).map_err(HandshakingError::PacketId)?;
-
-        let protocol_version = VarInt::read(cursor).map_err(HandshakingError::ProtocolVersion)?;
+        let protocol_version =
+            VarInt::read_from(cursor).map_err(HandshakingError::ProtocolVersion)?;
 
         let server_address = {
-            let server_addr_len = VarInt::read(cursor)
+            let server_addr_len = VarInt::read_from(cursor)
                 .map_err(ServerAddressError::Length)
                 .map_err(HandshakingError::ServerAddress)?;
             let mut server_addr_buffer = vec![0; server_addr_len.0 as usize];
@@ -84,7 +83,7 @@ impl Handshaking {
             .read_u16::<BigEndian>()
             .map_err(HandshakingError::ServerPort)?;
 
-        let next_state = match VarInt::read(cursor)
+        let next_state = match VarInt::read_from(cursor)
             .map_err(NextStateError::Parse)
             .map_err(HandshakingError::NextState)?
         {

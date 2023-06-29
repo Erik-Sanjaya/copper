@@ -18,6 +18,9 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use crate::handshaking::{Handshaking, HandshakingNextState};
 
 fn stream_into_vec(stream: &mut TcpStream) -> anyhow::Result<Vec<u8>> {
+    // TODO: handle legacy server ping list https://wiki.vg/Server_List_Ping#1.6
+    // cancer part is that it doesn't have a length prefixed. actually breaking
+    // protocol
     let length = VarInt::read_from(stream)?;
     if length.0 == 0 {
         trace!("length is 0, most likely EOF");
@@ -105,9 +108,7 @@ fn handle_socket(mut stream: TcpStream, addr: SocketAddr) -> anyhow::Result<()> 
     loop {
         trace!("State of {}: {:?}", addr, state);
         let buffer = stream_into_vec(&mut stream)?;
-
         debug!("Buffer from {}: {:?}", addr, buffer);
-
         let mut cursor = Cursor::new(buffer.as_slice());
 
         match state {

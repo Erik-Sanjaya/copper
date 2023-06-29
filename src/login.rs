@@ -16,7 +16,7 @@ use crate::{
 // 6. Server auth, both enable encryption
 // 7. S→C: Set Compression (optional)
 // 8. S→C: Login Success
-struct LoginStart {
+pub struct LoginStart {
     name: String,
     has_player_uuid: bool,
     player_uuid: Option<Uuid>,
@@ -32,8 +32,7 @@ enum LoginStartError {
 
 impl LoginStart {
     fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, LoginStartError> {
-        let _length = VarInt::read(cursor).map_err(LoginStartError::Length)?;
-        let packet_id = VarInt::read(cursor).map_err(LoginStartError::PacketId)?;
+        let packet_id = VarInt::read_from(cursor).map_err(LoginStartError::PacketId)?;
 
         Ok(LoginStart {
             name: "".to_owned(),

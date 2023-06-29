@@ -55,8 +55,7 @@ const U64_SIZE_IN_BYTES: usize = 8;
 
 impl Status {
     pub fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, StatusError> {
-        let _length = VarInt::read(cursor).map_err(StatusError::Length)?;
-        let packet_id = match VarInt::read(cursor) {
+        let packet_id = match VarInt::read_from(cursor) {
             Ok(VarInt(0x00)) => Ok(StatusPacketId::Status),
             Ok(VarInt(0x01)) => Ok(StatusPacketId::Ping),
             Err(e) => Err(StatusError::PacketId(PacketIdError::Parse(e))),
@@ -87,8 +86,8 @@ impl Status {
                 let packet_len =
                     VarInt(self.packet_id.to_varint().size() as i32 + status_entire_length);
 
-                packet_len.write(&mut response);
-                packet_id_as_varint.write(&mut response);
+                packet_len.write_to(&mut response);
+                packet_id_as_varint.write_to(&mut response);
 
                 status_as_protocol_string.write(&mut response);
             }
@@ -97,8 +96,8 @@ impl Status {
 
                 let packet_len = VarInt((packet_id_as_varint.size() + U64_SIZE_IN_BYTES) as i32);
 
-                packet_len.write(&mut response);
-                packet_id_as_varint.write(&mut response);
+                packet_len.write_to(&mut response);
+                packet_id_as_varint.write_to(&mut response);
                 response
                     .write_u64::<BigEndian>(payload)
                     .map_err(StatusError::IOError)?;
