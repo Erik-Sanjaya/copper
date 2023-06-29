@@ -1,4 +1,7 @@
-use std::io::Cursor;
+use std::{
+    io::{Cursor, Read},
+    string::FromUtf8Error,
+};
 
 use byteorder::ReadBytesExt;
 use thiserror::Error;
@@ -74,5 +77,50 @@ impl VarInt {
         }
 
         size
+    }
+}
+
+pub struct ProtocolString {
+    pub length: VarInt,
+    pub string: String,
+}
+
+#[derive(Debug, Error)]
+pub enum ProtocolStringError {
+    #[error("Packet length is invalid: {0}")]
+    Length(#[source] VarIntError),
+    #[error("Error with packet id: {0}")]
+    PacketId(#[source] VarIntError),
+    #[error("I/O error")]
+    IOError(#[source] std::io::Error),
+    #[error("Error parsing string from Utf8")]
+    FromUtf8(#[source] FromUtf8Error),
+}
+
+impl ProtocolString {
+    pub fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, ProtocolStringError> {
+        let length = VarInt::read(cursor).map_err(ProtocolStringError::Length)?;
+        let mut vec = vec![0; length.0 as usize];
+        cursor
+            .read_exact(&mut vec[..])
+            .map_err(ProtocolStringError::IOError)?;
+        let string = String::from_utf8(vec).map_err(ProtocolStringError::FromUtf8)?;
+
+        Ok(Self { length, string })
+    }
+
+    pub fn write(&self, buffer: &mut Vec<u8>) {
+        self.length.write(buffer);
+        buffer.extend_from_slice(self.string.as_bytes())
+    }
+}
+
+impl From<String> for ProtocolString {
+    fn from(value: String) -> Self {
+        let length = VarInt(value.len() as i32);
+        Self {
+            length,
+            string: value,
+        }
     }
 }

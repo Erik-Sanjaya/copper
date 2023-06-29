@@ -6,7 +6,7 @@ use std::{
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use tracing::debug;
 
-use crate::data_types::{VarInt, VarIntError};
+use crate::data_types::{ProtocolString, VarInt, VarIntError};
 use crate::server_status::ServerStatus;
 use thiserror::Error;
 
@@ -79,20 +79,18 @@ impl Status {
         match self.packet_id {
             StatusPacketId::Status => {
                 let server_status = ServerStatus::get_example();
-                let server_status_as_vec = serde_json::to_vec(&server_status).unwrap();
+                let status_as_protocol_string =
+                    ProtocolString::from(serde_json::to_string(&server_status).unwrap());
 
-                let string_len = VarInt(server_status_as_vec.len() as i32);
-                let packet_len = VarInt(
-                    (self.packet_id.to_varint().size()
-                        + string_len.size()
-                        + server_status_as_vec.len()) as i32,
-                );
+                let status_entire_length = status_as_protocol_string.length.0
+                    + status_as_protocol_string.length.size() as i32;
+                let packet_len =
+                    VarInt(self.packet_id.to_varint().size() as i32 + status_entire_length);
 
                 packet_len.write(&mut response);
                 packet_id_as_varint.write(&mut response);
 
-                string_len.write(&mut response);
-                response.extend_from_slice(server_status_as_vec.as_ref());
+                status_as_protocol_string.write(&mut response);
             }
             StatusPacketId::Ping => {
                 let payload = self.payload.ok_or(StatusError::MissingPayload)?;
