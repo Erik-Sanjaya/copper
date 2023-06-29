@@ -1,5 +1,5 @@
 use std::{
-    io::{Cursor, Read},
+    io::{Cursor, Read, Write},
     string::FromUtf8Error,
 };
 
@@ -19,7 +19,7 @@ pub enum VarIntError {
 pub struct VarInt(pub i32);
 
 impl VarInt {
-    pub fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, VarIntError> {
+    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, VarIntError> {
         let mut result = 0;
         let mut shift = 0;
 
@@ -28,7 +28,7 @@ impl VarInt {
                 return Err(VarIntError::Overflow);
             }
 
-            let byte = match cursor.read_u8() {
+            let byte = match reader.read_u8() {
                 Ok(b) => b,
                 Err(e) => {
                     error!("{:?}", e);
@@ -47,7 +47,7 @@ impl VarInt {
         Ok(Self(result))
     }
 
-    pub fn write(&self, buffer: &mut Vec<u8>) {
+    pub fn write_to(&self, buffer: &mut Vec<u8>) {
         let mut value = self.0;
 
         loop {
@@ -99,7 +99,7 @@ pub enum ProtocolStringError {
 
 impl ProtocolString {
     pub fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, ProtocolStringError> {
-        let length = VarInt::read(cursor).map_err(ProtocolStringError::Length)?;
+        let length = VarInt::read_from(cursor).map_err(ProtocolStringError::Length)?;
         let mut vec = vec![0; length.0 as usize];
         cursor
             .read_exact(&mut vec[..])
@@ -110,7 +110,7 @@ impl ProtocolString {
     }
 
     pub fn write(&self, buffer: &mut Vec<u8>) {
-        self.length.write(buffer);
+        self.length.write_to(buffer);
         buffer.extend_from_slice(self.string.as_bytes())
     }
 }

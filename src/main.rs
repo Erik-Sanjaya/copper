@@ -18,17 +18,13 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use crate::handshaking::{Handshaking, HandshakingNextState};
 
 fn stream_into_vec(stream: &mut TcpStream) -> anyhow::Result<Vec<u8>> {
-    let mut length_buffer = [0; 5];
-    let size_peeked = stream.peek(&mut length_buffer[..])?;
-    if size_peeked == 0 {
-        trace!("size_peeked is 0, most likely EOF");
-        return Err(anyhow!("amount of bytes peeked is 0"));
+    let length = VarInt::read_from(stream)?;
+    if length.0 == 0 {
+        trace!("length is 0, most likely EOF");
+        return Err(anyhow!("length is 0"));
     }
 
-    let mut length_cursor = Cursor::new(&length_buffer[..]);
-    let length = VarInt::read(&mut length_cursor)?;
-
-    let mut buffer = vec![0; length.0 as usize + length_cursor.position() as usize];
+    let mut buffer = vec![0; length.0 as usize];
     match stream.read_exact(&mut buffer[..]) {
         Ok(_) => (),
         Err(e) => {
@@ -90,10 +86,10 @@ fn handle_login(
     let string_len = VarInt(reply_json.len() as i32);
     let packet_len = VarInt((packet_id.size() + string_len.size() + reply_json.len()) as i32);
 
-    packet_len.write(&mut reply);
-    packet_id.write(&mut reply);
+    packet_len.write_to(&mut reply);
+    packet_id.write_to(&mut reply);
 
-    string_len.write(&mut reply);
+    string_len.write_to(&mut reply);
     reply.extend_from_slice(reply_json.as_bytes());
 
     writer.write_all(&reply)?;
