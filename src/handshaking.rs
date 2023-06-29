@@ -1,15 +1,9 @@
-use std::{
-    io::{Cursor, Read},
-    string::FromUtf8Error,
-};
+use std::io::{Cursor, Read};
 
 use byteorder::{BigEndian, ReadBytesExt};
 use thiserror::Error;
 
-use crate::{
-    data_types::{VarInt, VarIntError},
-    ProtocolError,
-};
+use crate::{data_types::VarInt, ProtocolError};
 
 #[derive(Debug)]
 pub struct Handshaking {
@@ -24,14 +18,6 @@ pub struct Handshaking {
 pub enum HandshakingNextState {
     Status = 1,
     Login = 2,
-}
-
-#[derive(Debug, Error)]
-pub enum NextStateError {
-    #[error("Packet length is invalid: {0}")]
-    Parse(#[source] VarIntError),
-    #[error("There is no next state option: {0}")]
-    InvalidType(i32),
 }
 
 impl Handshaking {

@@ -11,11 +11,11 @@ use std::{
 };
 
 use anyhow::anyhow;
-use data_types::{VarInt, VarIntError};
+use data_types::VarInt;
 use serde_json::json;
 use status::Status;
 use thiserror::Error;
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::handshaking::{Handshaking, HandshakingNextState};
 
@@ -61,7 +61,7 @@ fn stream_into_vec(stream: &mut TcpStream) -> anyhow::Result<Vec<u8>> {
     Ok(buffer)
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum State {
     Handshaking,
     Status,

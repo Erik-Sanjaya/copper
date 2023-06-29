@@ -8,10 +8,9 @@ use tracing::debug;
 
 use crate::server_status::ServerStatus;
 use crate::{
-    data_types::{ProtocolString, VarInt, VarIntError},
+    data_types::{ProtocolString, VarInt},
     ProtocolError,
 };
-use thiserror::Error;
 
 #[derive(Debug)]
 pub struct Status {
@@ -41,7 +40,7 @@ impl Status {
         let packet_id = match VarInt::read_from(cursor) {
             Ok(VarInt(0x00)) => Ok(StatusPacketId::Status),
             Ok(VarInt(0x01)) => Ok(StatusPacketId::Ping),
-            Err(e) => Err(ProtocolError::Malformed),
+            Err(e) => Err(e),
             Ok(VarInt(n)) => Err(ProtocolError::PacketId(n)),
         }?;
 

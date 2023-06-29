@@ -1,12 +1,8 @@
 use std::io::Cursor;
 
-use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{
-    data_types::{VarInt, VarIntError},
-    ProtocolError,
-};
+use crate::{data_types::VarInt, ProtocolError};
 
 // 1. C→S: Handshake with Next State set to 2 (login)
 // 2. C→S: Login Start
@@ -26,11 +22,7 @@ impl LoginStart {
     fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, ProtocolError> {
         let packet_id = VarInt::read_from(cursor)?;
 
-        Ok(LoginStart {
-            name: "".to_owned(),
-            has_player_uuid: false,
-            player_uuid: None,
-        })
+        return Err(ProtocolError::Unimplemented);
     }
 }
 

@@ -1,21 +1,10 @@
-use std::{
-    io::{Cursor, Read, Write},
-    string::FromUtf8Error,
-};
+use std::io::{Cursor, Read};
 
 use byteorder::ReadBytesExt;
-use thiserror::Error;
+
 use tracing::error;
 
 use crate::ProtocolError;
-
-#[derive(Debug, Error)]
-pub enum VarIntError {
-    #[error("Bytes exceeded the limit of VarInt")]
-    Overflow,
-    #[error("Bytes too short")]
-    MissingBytes,
-}
 
 #[derive(Debug)]
 pub struct VarInt(pub i32);
