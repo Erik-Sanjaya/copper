@@ -75,7 +75,7 @@ impl Status {
                 packet_len.write_to(&mut response);
                 packet_id_as_varint.write_to(&mut response);
 
-                status_as_protocol_string.write(&mut response);
+                status_as_protocol_string.write_to(&mut response);
             }
             StatusPacketId::Ping => {
                 let payload = self.payload.ok_or(ProtocolError::Missing)?;

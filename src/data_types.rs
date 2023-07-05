@@ -71,13 +71,14 @@ impl VarInt {
     }
 }
 
+#[derive(Debug)]
 pub struct ProtocolString {
     pub length: VarInt,
     pub string: String,
 }
 
 impl ProtocolString {
-    pub fn read(cursor: &mut Cursor<&[u8]>) -> Result<Self, ProtocolError> {
+    pub fn read_from(cursor: &mut Cursor<&[u8]>) -> Result<Self, ProtocolError> {
         let length = VarInt::read_from(cursor)?;
         let mut vec = vec![0; length.0 as usize];
         cursor
@@ -88,9 +89,13 @@ impl ProtocolString {
         Ok(Self { length, string })
     }
 
-    pub fn write(&self, buffer: &mut Vec<u8>) {
+    pub fn write_to(&self, buffer: &mut Vec<u8>) {
         self.length.write_to(buffer);
         buffer.extend_from_slice(self.string.as_bytes())
+    }
+
+    pub fn size(&self) -> usize {
+        self.length.size() + self.string.len()
     }
 }
 

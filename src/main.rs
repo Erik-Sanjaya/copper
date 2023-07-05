@@ -17,7 +17,10 @@ use status::Status;
 use thiserror::Error;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::handshaking::{Handshaking, HandshakingNextState};
+use crate::{
+    data_types::ProtocolString,
+    handshaking::{Handshaking, HandshakingNextState},
+};
 
 #[derive(Debug, Error)]
 pub enum ProtocolError {
@@ -36,7 +39,10 @@ pub enum ProtocolError {
     /// For features that have not been implemented yet.
     #[error("Unimplemented")]
     Unimplemented,
+    #[error("Parsing error")]
+    Parsing,
 }
+
 fn stream_into_vec(stream: &mut TcpStream) -> anyhow::Result<Vec<u8>> {
     // TODO: handle legacy server ping list https://wiki.vg/Server_List_Ping#1.6
     // cancer part is that it doesn't have a length prefixed. actually breaking
@@ -96,26 +102,49 @@ fn handle_login(
     writer: &mut TcpStream,
     state: &mut State,
 ) -> anyhow::Result<()> {
-    // TODO: implement all of these into actual struct.
-    let mut reply: Vec<u8> = vec![];
+    trace!("reading request");
+    let request = login::ServerBound::read_from(cursor)?;
+    let mut reply_buffer: Vec<u8> = vec![];
 
-    let reply_json = json!({
-        "text": "WIP",
+    trace!("writing response");
+    match request {
+        login::ServerBound::LoginStart(packet) => {
+            let response_packet = login::LoginSuccess {
+                uuid: packet.player_uuid.unwrap(),
+                username: packet.name,
+                number_of_properties: VarInt(0),
+                name: None,
+                value: None,
+                is_signed: None,
+                signature: None,
+            };
 
-    })
-    .to_string();
+            login::ClientBound::LoginSuccess(response_packet).write_to(&mut reply_buffer)?;
+            *state = State::Play;
+        }
+        login::ServerBound::EncryptionResponse(_) => {
+            return Err(anyhow!("UNIMPLEMENTED"));
+        }
+        login::ServerBound::LoginPluginResponse(_) => {
+            return Err(anyhow!("UNIMPLEMENTED"));
+        }
+    };
 
-    let packet_id = VarInt(0);
-    let string_len = VarInt(reply_json.len() as i32);
-    let packet_len = VarInt((packet_id.size() + string_len.size() + reply_json.len()) as i32);
+    // let reply_json = ProtocolString::from(
+    //     json!({
+    //         "text": "WIP",
 
-    packet_len.write_to(&mut reply);
-    packet_id.write_to(&mut reply);
+    //     })
+    //     .to_string(),
+    // );
 
-    string_len.write_to(&mut reply);
-    reply.extend_from_slice(reply_json.as_bytes());
+    // let reply_packet = login::ClientBound::Disconnect(login::Disconnect::new(reply_json));
+    // reply_packet.write_to(&mut reply_buffer)?;
 
-    writer.write_all(&reply)?;
+    trace!("write to stream");
+    writer
+        .write_all(&reply_buffer)
+        .map_err(ProtocolError::IOError)?;
     info!("WRITE LOGIN REPLY");
     writer.shutdown(Shutdown::Both)?;
 
@@ -127,7 +156,13 @@ fn handle_socket(mut stream: TcpStream, addr: SocketAddr) -> anyhow::Result<()> 
 
     loop {
         trace!("State of {}: {:?}", addr, state);
-        let buffer = stream_into_vec(&mut stream)?;
+        let buffer = match stream_into_vec(&mut stream) {
+            Ok(buf) => buf,
+            Err(e) => {
+                warn!("error while getting buffer: {e}");
+                vec![]
+            }
+        };
         debug!("Buffer from {}: {:?}", addr, buffer);
         let mut cursor = Cursor::new(buffer.as_slice());
 
