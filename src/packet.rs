@@ -19,11 +19,10 @@ impl Packet {
         let length = VarInt::read_from(stream)?;
         if length.0 == 0 {
             trace!("length is 0, most likely EOF");
-            return Err(std::io::Error::new(
+            return Err(ProtocolError::IOError(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
                 "length of packet is 0",
-            ))
-            .map_err(ProtocolError::IOError);
+            )));
         }
 
         // for my beloved, legacy stuff
@@ -40,7 +39,7 @@ impl Packet {
                 error!("Error with reading_exact: {:?}", e);
                 debug!("Buffer length: {:?}", length);
                 debug!("Buffer: {:?}", buffer);
-                return Err(e).map_err(ProtocolError::IOError);
+                return Err(ProtocolError::IOError(e));
             }
         };
 

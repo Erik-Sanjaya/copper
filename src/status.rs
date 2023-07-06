@@ -47,11 +47,7 @@ impl Status {
         // in the case that read_u64 accidentally read false data.
         let payload = match packet_id {
             StatusPacketId::Status => None,
-            StatusPacketId::Ping => Some(
-                cursor
-                    .read_u64::<BigEndian>()
-                    .map_err(ProtocolError::IOError)?,
-            ),
+            StatusPacketId::Ping => Some(cursor.read_u64::<BigEndian>()?),
         };
 
         Ok(Status { packet_id, payload })
@@ -84,15 +80,11 @@ impl Status {
 
                 packet_len.write_to(&mut response);
                 packet_id_as_varint.write_to(&mut response);
-                response
-                    .write_u64::<BigEndian>(payload)
-                    .map_err(ProtocolError::IOError)?;
+                response.write_u64::<BigEndian>(payload)?;
             }
         }
 
-        writer
-            .write_all(&response)
-            .map_err(ProtocolError::IOError)?;
+        writer.write_all(&response)?;
 
         debug!("Response written: {:?}", response);
 

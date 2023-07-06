@@ -72,9 +72,7 @@ impl Disconnect {
         packet_id.write_to(&mut response);
         self.reason.write_to(&mut response);
 
-        writer
-            .write_all(&response)
-            .map_err(ProtocolError::IOError)?;
+        writer.write_all(&response)?;
 
         Ok(response.len())
     }
@@ -136,9 +134,7 @@ impl LoginSuccess {
 
         // TODO: write the rest. i'm still unsure as to how it works
 
-        writer
-            .write_all(&response)
-            .map_err(ProtocolError::IOError)?;
+        writer.write_all(&response)?;
 
         Ok(response.len())
     }
@@ -193,14 +189,11 @@ pub struct LoginStart {
 impl LoginStart {
     fn read_from(cursor: &mut Cursor<&[u8]>) -> Result<Self, ProtocolError> {
         let name = ProtocolString::read_from(cursor)?;
-        let has_player_uuid = cursor.read_u8().map_err(ProtocolError::IOError)? != 0;
+        let has_player_uuid = cursor.read_u8()? != 0;
 
         let player_uuid = {
             let mut rest_of_bytes = vec![];
-            match cursor
-                .read_to_end(&mut rest_of_bytes)
-                .map_err(ProtocolError::IOError)?
-            {
+            match cursor.read_to_end(&mut rest_of_bytes)? {
                 0 => None,
                 16 => {
                     let buffer_for_uuid = rest_of_bytes[..16]

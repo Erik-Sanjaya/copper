@@ -43,6 +43,12 @@ pub enum ProtocolError {
     Parsing,
 }
 
+impl From<std::io::Error> for ProtocolError {
+    fn from(error: std::io::Error) -> Self {
+        ProtocolError::IOError(error)
+    }
+}
+
 fn stream_into_vec(stream: &mut TcpStream) -> anyhow::Result<Vec<u8>> {
     // TODO: handle legacy server ping list https://wiki.vg/Server_List_Ping#1.6
     // cancer part is that it doesn't have a length prefixed. actually breaking
@@ -142,9 +148,7 @@ fn handle_login(
     // reply_packet.write_to(&mut reply_buffer)?;
 
     trace!("write to stream");
-    writer
-        .write_all(&reply_buffer)
-        .map_err(ProtocolError::IOError)?;
+    writer.write_all(&reply_buffer)?;
     info!("WRITE LOGIN REPLY");
     writer.shutdown(Shutdown::Both)?;
 

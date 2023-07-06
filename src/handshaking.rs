@@ -29,16 +29,12 @@ impl Handshaking {
         let server_address = {
             let server_addr_len = VarInt::read_from(cursor)?;
             let mut server_addr_buffer = vec![0; server_addr_len.0 as usize];
-            cursor
-                .read_exact(&mut server_addr_buffer)
-                .map_err(ProtocolError::IOError)?;
+            cursor.read_exact(&mut server_addr_buffer)?;
 
             String::from_utf8(server_addr_buffer).map_err(|_| ProtocolError::Malformed)?
         };
 
-        let server_port = cursor
-            .read_u16::<BigEndian>()
-            .map_err(ProtocolError::IOError)?;
+        let server_port = cursor.read_u16::<BigEndian>()?;
 
         let next_state = match VarInt::read_from(cursor)? {
             VarInt(1) => HandshakingNextState::Status,

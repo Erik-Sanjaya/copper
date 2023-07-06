@@ -81,9 +81,7 @@ impl ProtocolString {
     pub fn read_from(cursor: &mut Cursor<&[u8]>) -> Result<Self, ProtocolError> {
         let length = VarInt::read_from(cursor)?;
         let mut vec = vec![0; length.0 as usize];
-        cursor
-            .read_exact(&mut vec[..])
-            .map_err(ProtocolError::IOError)?;
+        cursor.read_exact(&mut vec[..])?;
         let string = String::from_utf8(vec).map_err(|_| ProtocolError::Malformed)?;
 
         Ok(Self { length, string })
