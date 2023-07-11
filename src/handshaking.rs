@@ -1,9 +1,69 @@
-use std::io::{Cursor, Read};
+use std::{
+    io::{Cursor, Read},
+    net::TcpStream,
+};
 
 use byteorder::{BigEndian, ReadBytesExt};
 use thiserror::Error;
 
-use crate::{data_types::VarInt, ProtocolError};
+use crate::{
+    data_types::{ProtocolString, VarInt},
+    ProtocolError,
+};
+
+#[derive(Debug)]
+pub enum HandshakingServerBound {
+    Handshake(Handshake),
+}
+
+impl HandshakingServerBound {
+    pub fn read_from(stream: &mut TcpStream) -> Result<Self, ProtocolError> {
+        let length = VarInt::read_from(stream)?.0 as usize;
+
+        let packet_id = VarInt::read_from(stream)?;
+
+        let mut buffer = vec![0; length - packet_id.size()];
+        stream.read_exact(&mut buffer);
+
+        let mut cursor = Cursor::new(buffer);
+
+        match packet_id {
+            VarInt(0x00) => Ok(HandshakingServerBound::Handshake(Handshake::read_from(&mut cursor)?)),
+            VarInt(n) => Err(ProtocolError::PacketId(n)),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Handshake {
+    protocol_version: VarInt,
+    server_address: ProtocolString,
+    server_port: u16,
+    next_state: HandshakingNextState,
+}
+
+impl Handshake {
+    fn read_from<R>(reader: &mut R) -> Result<Self, ProtocolError>
+    where
+        R: Read,
+    {
+        let protocol_version = VarInt::read_from(reader)?;
+        let server_address = ProtocolString::read_from(reader)?;
+        let server_port = reader.read_u16::<BigEndian>()?;
+        let next_state = match VarInt::read_from(reader)? {
+            VarInt(1) => HandshakingNextState::Status,
+            VarInt(2) => HandshakingNextState::Login,
+            VarInt(_) => return Err(ProtocolError::Malformed),
+        };
+
+        Ok(Self {
+            protocol_version,
+            server_address,
+            server_port,
+            next_state,
+        })
+    }
+}
 
 #[derive(Debug)]
 pub struct Handshaking {

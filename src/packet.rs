@@ -1,8 +1,16 @@
-use std::{io::Read, net::TcpStream};
+use std::{
+    io::{Read, Write},
+    net::TcpStream,
+};
 
 use tracing::{debug, error, trace};
 
-use crate::{data_types::VarInt, ProtocolError, State};
+use crate::{
+    data_types::VarInt,
+    handshaking::{Handshake, Handshaking, HandshakingServerBound},
+    status::{StatusClientBound, StatusServerBound},
+    ProtocolError, State,
+};
 
 struct Packet(Vec<u8>);
 // TODO list
@@ -44,5 +52,57 @@ impl Packet {
         };
 
         Ok(Self(buffer))
+    }
+
+    pub fn write_stream(stream: &mut TcpStream) -> Result<usize, ProtocolError> {
+        Err(ProtocolError::Unimplemented)
+    }
+}
+
+pub enum ClientBound {
+    Status(StatusClientBound),
+}
+
+impl ClientBound {
+    pub fn parse_packet(
+        stream: &mut TcpStream,
+        state: &State,
+        request: ServerBound,
+    ) -> Result<Self, ProtocolError> {
+        match state {
+            State::Handshaking => {
+                error!("Handshaking packet for clientbound?");
+                Err(ProtocolError::Internal)
+            }
+            State::Status => Ok(Self::Status(StatusClientBound::from_request(request)?)),
+            State::Login => Err(ProtocolError::Unimplemented),
+            State::Play => Err(ProtocolError::Unimplemented),
+        }
+    }
+
+    pub fn write_to(&self, stream: &mut TcpStream) -> Result<usize, ProtocolError> {
+        Err(ProtocolError::Unimplemented)
+    }
+}
+
+pub enum ServerBound {
+    Handshake(HandshakingServerBound),
+    Status(StatusServerBound),
+}
+
+impl ServerBound {
+    pub fn parse_packet(stream: &mut TcpStream, state: &State) -> Result<Self, ProtocolError> {
+        match state {
+            State::Handshaking => Ok(Self::Handshake(HandshakingServerBound::read_from(stream)?)),
+            State::Status => Ok(Self::Status(StatusServerBound::read_from(stream)?)),
+            State::Login => {
+                trace!("unimplemented");
+                Err(ProtocolError::Unimplemented)
+            }
+            State::Play => {
+                trace!("unimplemented");
+                Err(ProtocolError::Unimplemented)
+            }
+        }
     }
 }

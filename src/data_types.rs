@@ -78,10 +78,13 @@ pub struct ProtocolString {
 }
 
 impl ProtocolString {
-    pub fn read_from(cursor: &mut Cursor<&[u8]>) -> Result<Self, ProtocolError> {
-        let length = VarInt::read_from(cursor)?;
+    pub fn read_from<R>(reader: &mut R) -> Result<Self, ProtocolError>
+    where
+        R: Read,
+    {
+        let length = VarInt::read_from(reader)?;
         let mut vec = vec![0; length.0 as usize];
-        cursor.read_exact(&mut vec[..])?;
+        reader.read_exact(&mut vec[..])?;
         let string = String::from_utf8(vec).map_err(|_| ProtocolError::Malformed)?;
 
         Ok(Self { length, string })

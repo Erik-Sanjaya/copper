@@ -8,10 +8,12 @@ mod status;
 use std::{
     io::{Cursor, Read, Write},
     net::{Shutdown, SocketAddr, TcpListener, TcpStream},
+    sync::mpsc,
 };
 
 use anyhow::anyhow;
 use data_types::VarInt;
+use packet::ServerBound;
 use serde_json::json;
 use status::Status;
 use thiserror::Error;
@@ -20,6 +22,7 @@ use tracing::{debug, error, info, trace, warn};
 use crate::{
     data_types::ProtocolString,
     handshaking::{Handshaking, HandshakingNextState},
+    packet::ClientBound,
 };
 
 #[derive(Debug, Error)]
@@ -41,6 +44,10 @@ pub enum ProtocolError {
     Unimplemented,
     #[error("Parsing error")]
     Parsing,
+    #[error("serde_json error")]
+    SerdeJson(#[source] serde_json::error::Error),
+    #[error("Internal error")]
+    Internal,
 }
 
 impl From<std::io::Error> for ProtocolError {
@@ -49,14 +56,21 @@ impl From<std::io::Error> for ProtocolError {
     }
 }
 
-fn stream_into_vec(stream: &mut TcpStream) -> anyhow::Result<Vec<u8>> {
+impl From<serde_json::error::Error> for ProtocolError {
+    fn from(error: serde_json::error::Error) -> Self {
+        ProtocolError::SerdeJson(error)
+    }
+}
+
+fn stream_into_vec(stream: &mut TcpStream) -> Result<Vec<u8>, ProtocolError> {
     // TODO: handle legacy server ping list https://wiki.vg/Server_List_Ping#1.6
     // cancer part is that it doesn't have a length prefixed. actually breaking
     // protocol
     let length = VarInt::read_from(stream)?;
+
     if length.0 == 0 {
-        trace!("length is 0, most likely EOF");
-        return Err(anyhow!("length is 0"));
+        trace!("length is 0, most likely EOF but shouldn't be possible");
+        panic!("EOF check should've been made in VarInt::read_from");
     }
 
     let mut buffer = vec![0; length.0 as usize];
@@ -74,7 +88,7 @@ fn stream_into_vec(stream: &mut TcpStream) -> anyhow::Result<Vec<u8>> {
 }
 
 #[derive(Debug, PartialEq)]
-enum State {
+pub enum State {
     Handshaking,
     Status,
     Login,
@@ -157,39 +171,51 @@ fn handle_login(
 
 fn handle_socket(mut stream: TcpStream, addr: SocketAddr) -> anyhow::Result<()> {
     let mut state = State::Handshaking;
+    let (server_packet_sender, server_packet_receiver) = mpsc::channel::<ServerBound>();
 
     loop {
         trace!("State of {}: {:?}", addr, state);
-        let buffer = match stream_into_vec(&mut stream) {
-            Ok(buf) => buf,
-            Err(e) => {
-                warn!("error while getting buffer: {e}");
-                vec![]
-            }
-        };
+        // let buffer = match stream_into_vec(&mut stream) {
+        //     Ok(buf) => buf,
+        //     Err(e) => {
+        //         warn!("error while getting buffer: {e}");
+        //         vec![]
+        //     }
+        // };
+        let buffer = stream_into_vec(&mut stream)?;
         debug!("Buffer from {}: {:?}", addr, buffer);
         let mut cursor = Cursor::new(buffer.as_slice());
 
-        match state {
-            State::Handshaking => {
-                let handshake = handle_handshaking(&mut cursor, &mut state)?;
-                info!("Handshake processed from {}", addr);
-                trace!("{} | {:?}", addr, handshake);
+        server_packet_sender.send(ServerBound::parse_packet(&mut stream, &state)?)?;
+        match server_packet_receiver.recv() {
+            Ok(packet) => {
+                ClientBound::parse_packet(&mut stream, &state, packet)?.write_to(&mut stream)?;
             }
-            State::Status => {
-                let status = handle_status(&mut cursor, &mut stream)?;
-                info!("Status processed from {}", addr);
-                trace!("{} | {:?}", addr, status);
-            }
-            State::Login => {
-                let login = handle_login(&mut cursor, &mut stream, &mut state)?;
-                info!("Login processed from {}", addr);
-                trace!("{} | {:?}", addr, login);
-            }
-            State::Play => {
-                info!("ENTERING PLAY STATE");
+            Err(e) => {
+                trace!("channel is probably empty {e:?}");
             }
         };
+
+        // match state {
+        //     State::Handshaking => {
+        //         let handshake = handle_handshaking(&mut cursor, &mut state)?;
+        //         info!("Handshake processed from {}", addr);
+        //         trace!("{} | {:?}", addr, handshake);
+        //     }
+        //     State::Status => {
+        //         let status = handle_status(&mut cursor, &mut stream)?;
+        //         info!("Status processed from {}", addr);
+        //         trace!("{} | {:?}", addr, status);
+        //     }
+        //     State::Login => {
+        //         let login = handle_login(&mut cursor, &mut stream, &mut state)?;
+        //         info!("Login processed from {}", addr);
+        //         trace!("{} | {:?}", addr, login);
+        //     }
+        //     State::Play => {
+        //         info!("ENTERING PLAY STATE");
+        //     }
+        // };
     }
 }
 

@@ -1,16 +1,161 @@
 use std::{
-    io::{Cursor, Write},
+    io::{Cursor, Read, Write},
     net::TcpStream,
 };
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use tracing::debug;
+use tracing::{debug, error};
 
-use crate::server_status::ServerStatus;
 use crate::{
     data_types::{ProtocolString, VarInt},
     ProtocolError,
 };
+use crate::{packet::ServerBound, server_status::ServerStatus};
+
+pub enum StatusClientBound {
+    StatusResponse(StatusResponse),
+    PingResponse(PingResponse),
+}
+
+impl StatusClientBound {}
+
+impl StatusClientBound {
+    pub fn write_to(&self, stream: &mut TcpStream) -> Result<usize, ProtocolError> {
+        match self {
+            StatusClientBound::StatusResponse(StatusResponse { json_response }) => {
+                let mut buffer = vec![];
+
+                let packet_id = VarInt(0);
+                let packet_length = VarInt((packet_id.size() + json_response.size()) as i32);
+
+                packet_length.write_to(&mut buffer);
+                packet_id.write_to(&mut buffer);
+                json_response.write_to(&mut buffer);
+
+                stream.write_all(&buffer);
+
+                Ok(buffer.len())
+            }
+            StatusClientBound::PingResponse(req) => Err(ProtocolError::Unimplemented),
+        }
+    }
+
+    pub fn from_request(request: ServerBound) -> Result<Self, ProtocolError> {
+        match request {
+            ServerBound::Status(req) => match req {
+                StatusServerBound::StatusRequest(_) => {
+                    let server_status = ServerStatus::get_example();
+                    let status_string = serde_json::to_string(&server_status)?;
+
+                    Ok(Self::StatusResponse(StatusResponse {
+                        json_response: ProtocolString::from(status_string),
+                    }))
+                }
+                StatusServerBound::PingRequest(PingRequest { payload }) => {
+                    Ok(Self::PingResponse(PingResponse { payload }))
+                }
+            },
+            _ => {
+                error!("why would the request be in another state? should be impossible.");
+                Err(ProtocolError::Internal)
+            }
+        }
+    }
+}
+
+struct StatusResponse {
+    json_response: ProtocolString,
+}
+
+impl StatusResponse {
+    fn from_request(request: StatusServerBound) -> Result<Self, ProtocolError> {
+        match request {
+            StatusServerBound::StatusRequest(_) => Ok(Self {
+                json_response: ProtocolString::from(serde_json::to_string(
+                    &ServerStatus::get_example(),
+                )?),
+            }),
+            StatusServerBound::PingRequest(_) => Err(ProtocolError::Malformed),
+        }
+    }
+    fn write_to(&self, stream: &mut TcpStream) -> Result<usize, ProtocolError> {
+        let mut response_buffer = vec![];
+
+        let server_status = ServerStatus::get_example();
+        let status_string = serde_json::to_string(&server_status)?;
+
+        let packet_id = VarInt(0);
+        let packet_length = VarInt((packet_id.size() + self.json_response.size()) as i32);
+
+        packet_length.write_to(&mut response_buffer);
+        packet_id.write_to(&mut response_buffer);
+        self.json_response.write_to(&mut response_buffer);
+
+        stream.write_all(&response_buffer);
+
+        Ok(response_buffer.len())
+    }
+}
+
+struct PingResponse {
+    payload: u64,
+}
+
+impl PingResponse {
+    fn write_to(&self, stream: &mut TcpStream) -> Result<usize, ProtocolError> {
+        Err(ProtocolError::Unimplemented)
+    }
+}
+
+pub enum StatusServerBound {
+    StatusRequest(StatusRequest),
+    PingRequest(PingRequest),
+}
+
+impl StatusServerBound {
+    pub fn read_from(stream: &mut TcpStream) -> Result<Self, ProtocolError> {
+        let length = VarInt::read_from(stream)?.0 as usize;
+
+        let packet_id = VarInt::read_from(stream)?;
+
+        let mut buffer = vec![0; length - packet_id.size()];
+        stream.read_exact(&mut buffer);
+
+        let mut cursor = Cursor::new(buffer);
+
+        match packet_id {
+            VarInt(0x00) => Ok(Self::StatusRequest(StatusRequest::read_from(stream)?)),
+            VarInt(0x01) => Ok(Self::PingRequest(PingRequest::read_from(stream)?)),
+            VarInt(n) => Err(ProtocolError::PacketId(n)),
+        }
+    }
+}
+
+pub struct StatusRequest {}
+
+impl StatusRequest {
+    pub fn read_from<R>(reader: &mut R) -> Result<Self, ProtocolError>
+    where
+        R: Read,
+    {
+        // like, this can't fail. it's just formality
+        Ok(Self {})
+    }
+}
+
+pub struct PingRequest {
+    payload: u64,
+}
+
+impl PingRequest {
+    pub fn read_from<R>(reader: &mut R) -> Result<Self, ProtocolError>
+    where
+        R: Read,
+    {
+        let payload = reader.read_u64::<BigEndian>()?;
+        Ok(Self { payload })
+    }
+}
 
 #[derive(Debug)]
 pub struct Status {
