@@ -4,10 +4,9 @@ use std::{
 };
 
 use byteorder::{BigEndian, ReadBytesExt};
-use thiserror::Error;
 
 use crate::{
-    data_types::{ProtocolString, VarInt},
+    data_types::{DataType, ProtocolString, VarInt},
     ProtocolError,
 };
 
@@ -23,12 +22,14 @@ impl HandshakingServerBound {
         let packet_id = VarInt::read_from(stream)?;
 
         let mut buffer = vec![0; length - packet_id.size()];
-        stream.read_exact(&mut buffer);
+        stream.read_exact(&mut buffer)?;
 
         let mut cursor = Cursor::new(buffer);
 
         match packet_id {
-            VarInt(0x00) => Ok(HandshakingServerBound::Handshake(Handshake::read_from(&mut cursor)?)),
+            VarInt(0x00) => Ok(HandshakingServerBound::Handshake(Handshake::read_from(
+                &mut cursor,
+            )?)),
             VarInt(n) => Err(ProtocolError::PacketId(n)),
         }
     }

@@ -5,7 +5,7 @@ use tracing::trace;
 use uuid::Uuid;
 
 use crate::{
-    data_types::{ProtocolString, VarInt},
+    data_types::{DataType, ProtocolString, VarInt},
     ProtocolError,
 };
 
@@ -68,9 +68,9 @@ impl Disconnect {
         let packet_id = VarInt(0x00);
         let packet_length = VarInt((packet_id.size() + self.reason.size()) as i32);
 
-        packet_length.write_to(&mut response);
-        packet_id.write_to(&mut response);
-        self.reason.write_to(&mut response);
+        packet_length.write_to(&mut response)?;
+        packet_id.write_to(&mut response)?;
+        self.reason.write_to(&mut response)?;
 
         writer.write_all(&response)?;
 
@@ -126,11 +126,11 @@ impl LoginSuccess {
                 + self.number_of_properties.size()) as i32,
         );
 
-        packet_length.write_to(&mut response);
-        packet_id.write_to(&mut response);
+        packet_length.write_to(&mut response)?;
+        packet_id.write_to(&mut response)?;
         response.extend_from_slice(uuid);
-        self.username.write_to(&mut response);
-        self.number_of_properties.write_to(&mut response);
+        self.username.write_to(&mut response)?;
+        self.number_of_properties.write_to(&mut response)?;
 
         // TODO: write the rest. i'm still unsure as to how it works
 

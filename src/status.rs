@@ -7,7 +7,7 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use tracing::{debug, error};
 
 use crate::{
-    data_types::{ProtocolString, VarInt},
+    data_types::{DataType, ProtocolString, VarInt},
     ProtocolError,
 };
 use crate::{packet::ServerBound, server_status::ServerStatus};
@@ -28,11 +28,11 @@ impl StatusClientBound {
                 let packet_id = VarInt(0);
                 let packet_length = VarInt((packet_id.size() + json_response.size()) as i32);
 
-                packet_length.write_to(&mut buffer);
-                packet_id.write_to(&mut buffer);
-                json_response.write_to(&mut buffer);
+                packet_length.write_to(&mut buffer)?;
+                packet_id.write_to(&mut buffer)?;
+                json_response.write_to(&mut buffer)?;
 
-                stream.write_all(&buffer);
+                stream.write_all(&buffer)?;
 
                 Ok(buffer.len())
             }
@@ -63,7 +63,7 @@ impl StatusClientBound {
     }
 }
 
-struct StatusResponse {
+pub struct StatusResponse {
     json_response: ProtocolString,
 }
 
@@ -81,23 +81,20 @@ impl StatusResponse {
     fn write_to(&self, stream: &mut TcpStream) -> Result<usize, ProtocolError> {
         let mut response_buffer = vec![];
 
-        let server_status = ServerStatus::get_example();
-        let status_string = serde_json::to_string(&server_status)?;
-
         let packet_id = VarInt(0);
         let packet_length = VarInt((packet_id.size() + self.json_response.size()) as i32);
 
-        packet_length.write_to(&mut response_buffer);
-        packet_id.write_to(&mut response_buffer);
-        self.json_response.write_to(&mut response_buffer);
+        packet_length.write_to(&mut response_buffer)?;
+        packet_id.write_to(&mut response_buffer)?;
+        self.json_response.write_to(&mut response_buffer)?;
 
-        stream.write_all(&response_buffer);
+        stream.write_all(&response_buffer)?;
 
         Ok(response_buffer.len())
     }
 }
 
-struct PingResponse {
+pub struct PingResponse {
     payload: u64,
 }
 
@@ -119,9 +116,7 @@ impl StatusServerBound {
         let packet_id = VarInt::read_from(stream)?;
 
         let mut buffer = vec![0; length - packet_id.size()];
-        stream.read_exact(&mut buffer);
-
-        let mut cursor = Cursor::new(buffer);
+        stream.read_exact(&mut buffer)?;
 
         match packet_id {
             VarInt(0x00) => Ok(Self::StatusRequest(StatusRequest::read_from(stream)?)),
@@ -213,18 +208,18 @@ impl Status {
                 let packet_len =
                     VarInt(self.packet_id.to_varint().size() as i32 + status_entire_length);
 
-                packet_len.write_to(&mut response);
-                packet_id_as_varint.write_to(&mut response);
+                packet_len.write_to(&mut response)?;
+                packet_id_as_varint.write_to(&mut response)?;
 
-                status_as_protocol_string.write_to(&mut response);
+                status_as_protocol_string.write_to(&mut response)?;
             }
             StatusPacketId::Ping => {
                 let payload = self.payload.ok_or(ProtocolError::Missing)?;
 
                 let packet_len = VarInt((packet_id_as_varint.size() + U64_SIZE_IN_BYTES) as i32);
 
-                packet_len.write_to(&mut response);
-                packet_id_as_varint.write_to(&mut response);
+                packet_len.write_to(&mut response)?;
+                packet_id_as_varint.write_to(&mut response)?;
                 response.write_u64::<BigEndian>(payload)?;
             }
         }

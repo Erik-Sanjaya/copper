@@ -12,15 +12,14 @@ use std::{
 };
 
 use anyhow::anyhow;
-use data_types::VarInt;
+use data_types::{DataType, VarInt};
 use packet::ServerBound;
-use serde_json::json;
+
 use status::Status;
 use thiserror::Error;
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
-    data_types::ProtocolString,
     handshaking::{Handshaking, HandshakingNextState},
     packet::ClientBound,
 };

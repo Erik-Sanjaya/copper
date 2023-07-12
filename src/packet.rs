@@ -1,13 +1,10 @@
-use std::{
-    io::{Read, Write},
-    net::TcpStream,
-};
+use std::{io::Read, net::TcpStream};
 
 use tracing::{debug, error, trace};
 
 use crate::{
-    data_types::VarInt,
-    handshaking::{Handshake, Handshaking, HandshakingServerBound},
+    data_types::{DataType, VarInt},
+    handshaking::HandshakingServerBound,
     status::{StatusClientBound, StatusServerBound},
     ProtocolError, State,
 };

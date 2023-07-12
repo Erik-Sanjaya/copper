@@ -1,16 +1,22 @@
-use std::io::{Cursor, Read};
+use std::io::{Read, Write};
 
-use byteorder::ReadBytesExt;
+use byteorder::{ReadBytesExt, WriteBytesExt};
 
 use tracing::error;
 
 use crate::ProtocolError;
 
+pub trait DataType: Sized {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError>;
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<usize, ProtocolError>;
+    fn size(&self) -> usize;
+}
+
 #[derive(Debug)]
 pub struct VarInt(pub i32);
 
-impl VarInt {
-    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
+impl DataType for VarInt {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
         let mut result = 0;
         let mut shift = 0;
 
@@ -38,24 +44,28 @@ impl VarInt {
         Ok(Self(result))
     }
 
-    pub fn write_to(&self, buffer: &mut Vec<u8>) {
+    fn write_to<W: Write>(&self, buffer: &mut W) -> Result<usize, ProtocolError> {
         let mut value = self.0;
+        let mut bytes = 0;
 
         loop {
             let mut temp = (value & 0x7f) as u8;
             value >>= 7;
+            bytes += 1;
 
             if value != 0 {
                 temp |= 0x80;
-                buffer.push(temp);
+                buffer.write_u8(temp)?;
             } else {
-                buffer.push(temp);
+                buffer.write_u8(temp)?;
                 break;
             }
         }
+
+        Ok(bytes)
     }
 
-    pub fn size(&self) -> usize {
+    fn size(&self) -> usize {
         let mut value = self.0;
         let mut size = 0;
 
@@ -77,11 +87,8 @@ pub struct ProtocolString {
     pub string: String,
 }
 
-impl ProtocolString {
-    pub fn read_from<R>(reader: &mut R) -> Result<Self, ProtocolError>
-    where
-        R: Read,
-    {
+impl DataType for ProtocolString {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
         let length = VarInt::read_from(reader)?;
         let mut vec = vec![0; length.0 as usize];
         reader.read_exact(&mut vec[..])?;
@@ -90,12 +97,14 @@ impl ProtocolString {
         Ok(Self { length, string })
     }
 
-    pub fn write_to(&self, buffer: &mut Vec<u8>) {
-        self.length.write_to(buffer);
-        buffer.extend_from_slice(self.string.as_bytes())
+    fn write_to<W: Write>(&self, buffer: &mut W) -> Result<usize, ProtocolError> {
+        self.length.write_to(buffer)?;
+        buffer.write_all(self.string.as_bytes())?;
+
+        Ok(self.size())
     }
 
-    pub fn size(&self) -> usize {
+    fn size(&self) -> usize {
         self.length.size() + self.string.len()
     }
 }
