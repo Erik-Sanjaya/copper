@@ -1,7 +1,9 @@
+// mod client;
 mod data_types;
 mod handshaking;
 mod login;
 mod packet;
+mod play;
 mod server_status;
 mod status;
 
@@ -122,12 +124,12 @@ fn handle_login(
     state: &mut State,
 ) -> anyhow::Result<()> {
     trace!("reading request");
-    let request = login::ServerBound::read_from(cursor)?;
+    let request = login::LoginServerBound::read_from(cursor)?;
     let mut reply_buffer: Vec<u8> = vec![];
 
     trace!("writing response");
     match request {
-        login::ServerBound::LoginStart(packet) => {
+        login::LoginServerBound::LoginStart(packet) => {
             let response_packet = login::LoginSuccess {
                 uuid: packet.player_uuid.unwrap(),
                 username: packet.name,
@@ -138,13 +140,13 @@ fn handle_login(
                 signature: None,
             };
 
-            login::ClientBound::LoginSuccess(response_packet).write_to(&mut reply_buffer)?;
+            login::LoginClientBound::LoginSuccess(response_packet).write_to(&mut reply_buffer)?;
             *state = State::Play;
         }
-        login::ServerBound::EncryptionResponse(_) => {
+        login::LoginServerBound::EncryptionResponse(_) => {
             return Err(anyhow!("UNIMPLEMENTED"));
         }
-        login::ServerBound::LoginPluginResponse(_) => {
+        login::LoginServerBound::LoginPluginResponse(_) => {
             return Err(anyhow!("UNIMPLEMENTED"));
         }
     };

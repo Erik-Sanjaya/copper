@@ -19,7 +19,7 @@ use crate::{
 // 8. S→C: Login Success
 
 #[derive(Debug)]
-pub enum ClientBound {
+pub enum LoginClientBound {
     Disconnect(Disconnect),
     EncryptionRequest(EncryptionRequest),
     LoginSuccess(LoginSuccess),
@@ -27,7 +27,7 @@ pub enum ClientBound {
     LoginPluginRequest(LoginPluginRequest),
 }
 
-impl ClientBound {
+impl LoginClientBound {
     pub fn write_to<W>(&self, writer: &mut W) -> Result<usize, ProtocolError>
     where
         W: Write,
@@ -153,18 +153,18 @@ pub struct LoginPluginRequest {
 }
 
 #[derive(Debug)]
-pub enum ServerBound {
+pub enum LoginServerBound {
     LoginStart(LoginStart),
     EncryptionResponse(EncryptionResponse),
     LoginPluginResponse(LoginPluginResponse),
 }
 
-impl ServerBound {
+impl LoginServerBound {
     pub fn read_from(cursor: &mut Cursor<&[u8]>) -> Result<Self, ProtocolError> {
         let packet_id = VarInt::read_from(cursor)?;
 
         match packet_id {
-            VarInt(0x00) => Ok(ServerBound::LoginStart(LoginStart::read_from(cursor)?)),
+            VarInt(0x00) => Ok(LoginServerBound::LoginStart(LoginStart::read_from(cursor)?)),
             VarInt(0x01) => {
                 trace!("unimplemented");
                 Err(ProtocolError::Unimplemented)

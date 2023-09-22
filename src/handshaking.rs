@@ -16,13 +16,13 @@ pub enum HandshakingServerBound {
 }
 
 impl HandshakingServerBound {
-    pub fn read_from(stream: &mut TcpStream) -> Result<Self, ProtocolError> {
-        let length = VarInt::read_from(stream)?.0 as usize;
+    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
+        let length = VarInt::read_from(reader)?.0 as usize;
 
-        let packet_id = VarInt::read_from(stream)?;
+        let packet_id = VarInt::read_from(reader)?;
 
         let mut buffer = vec![0; length - packet_id.size()];
-        stream.read_exact(&mut buffer)?;
+        reader.read_exact(&mut buffer)?;
 
         let mut cursor = Cursor::new(buffer);
 

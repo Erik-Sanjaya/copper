@@ -110,17 +110,17 @@ pub enum StatusServerBound {
 }
 
 impl StatusServerBound {
-    pub fn read_from(stream: &mut TcpStream) -> Result<Self, ProtocolError> {
-        let length = VarInt::read_from(stream)?.0 as usize;
+    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
+        let length = VarInt::read_from(reader)?.0 as usize;
 
-        let packet_id = VarInt::read_from(stream)?;
+        let packet_id = VarInt::read_from(reader)?;
 
         let mut buffer = vec![0; length - packet_id.size()];
-        stream.read_exact(&mut buffer)?;
+        reader.read_exact(&mut buffer)?;
 
         match packet_id {
-            VarInt(0x00) => Ok(Self::StatusRequest(StatusRequest::read_from(stream)?)),
-            VarInt(0x01) => Ok(Self::PingRequest(PingRequest::read_from(stream)?)),
+            VarInt(0x00) => Ok(Self::StatusRequest(StatusRequest::read_from(reader)?)),
+            VarInt(0x01) => Ok(Self::PingRequest(PingRequest::read_from(reader)?)),
             VarInt(n) => Err(ProtocolError::PacketId(n)),
         }
     }

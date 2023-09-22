@@ -1,13 +1,26 @@
-use std::{io::Read, net::TcpStream};
+use std::{
+    io::{Read, Write},
+    net::TcpStream,
+};
 
 use tracing::{debug, error, trace};
 
 use crate::{
     data_types::{DataType, VarInt},
     handshaking::HandshakingServerBound,
+    login::{LoginClientBound, LoginServerBound},
+    play::{PlayClientBound, PlayServerBound},
     status::{StatusClientBound, StatusServerBound},
     ProtocolError, State,
 };
+
+trait PacketClientBound {
+    fn write_to<W: Write>(&self, writer: W) -> Result<usize, ProtocolError>;
+}
+
+trait PacketServerBound: Sized {
+    fn read_from<R: Read>(reader: R) -> Result<Self, ProtocolError>;
+}
 
 struct Packet(Vec<u8>);
 // TODO list
@@ -58,6 +71,8 @@ impl Packet {
 
 pub enum ClientBound {
     Status(StatusClientBound),
+    Login(LoginClientBound),
+    Play(PlayClientBound),
 }
 
 impl ClientBound {
@@ -85,13 +100,15 @@ impl ClientBound {
 pub enum ServerBound {
     Handshake(HandshakingServerBound),
     Status(StatusServerBound),
+    Login(LoginServerBound),
+    Play(PlayServerBound),
 }
 
 impl ServerBound {
-    pub fn parse_packet(stream: &mut TcpStream, state: &State) -> Result<Self, ProtocolError> {
+    pub fn parse_packet<R: Read>(reader: &mut R, state: &State) -> Result<Self, ProtocolError> {
         match state {
-            State::Handshaking => Ok(Self::Handshake(HandshakingServerBound::read_from(stream)?)),
-            State::Status => Ok(Self::Status(StatusServerBound::read_from(stream)?)),
+            State::Handshaking => Ok(Self::Handshake(HandshakingServerBound::read_from(reader)?)),
+            State::Status => Ok(Self::Status(StatusServerBound::read_from(reader)?)),
             State::Login => {
                 trace!("unimplemented");
                 Err(ProtocolError::Unimplemented)
