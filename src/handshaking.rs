@@ -4,6 +4,7 @@ use std::{
 };
 
 use byteorder::{BigEndian, ReadBytesExt};
+use tracing::trace;
 
 use crate::{
     data_types::{DataType, ProtocolString, VarInt},
@@ -17,9 +18,12 @@ pub enum HandshakingServerBound {
 
 impl HandshakingServerBound {
     pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
-        let length = VarInt::read_from(reader)?.0 as usize;
+        let VarInt(length) = VarInt::read_from(reader)?;
+        let length = length as usize;
 
         let packet_id = VarInt::read_from(reader)?;
+
+        trace!("[DELETE THIS] PACKET ID {:?}", packet_id);
 
         let mut buffer = vec![0; length - packet_id.size()];
         reader.read_exact(&mut buffer)?;
@@ -28,6 +32,9 @@ impl HandshakingServerBound {
 
         match packet_id {
             VarInt(0x00) => Ok(HandshakingServerBound::Handshake(Handshake::read_from(
+                &mut cursor,
+            )?)),
+            VarInt(0xFE) => Ok(HandshakingServerBound::Handshake(Handshake::legacy(
                 &mut cursor,
             )?)),
             VarInt(n) => Err(ProtocolError::PacketId(n)),
@@ -63,6 +70,13 @@ impl Handshake {
             server_port,
             next_state,
         })
+    }
+
+    fn legacy<R>(reader: &mut R) -> Result<Self, ProtocolError>
+    where
+        R: Read,
+    {
+        unimplemented!()
     }
 }
 

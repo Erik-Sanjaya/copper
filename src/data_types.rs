@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
 
-use tracing::error;
+use tracing::{error, trace};
 
 use crate::ProtocolError;
 
@@ -36,6 +36,7 @@ impl DataType for VarInt {
             result |= ((byte & 0x7F) as i32) << shift;
             shift += 7;
 
+            trace!("RESULT INT {:?}", result);
             if byte & 0x80 == 0 {
                 break;
             }

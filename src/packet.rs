@@ -1,3 +1,8 @@
+//! The module handling all packets
+//!
+//! This is where the magic does not happen, but the pain does.
+//! If you are unfamiliar, the Minecraft protocol is split into 4 states,
+//! being `Handshake`, `Status`, `Login`, and `Play`
 use std::{
     io::{Read, Write},
     net::TcpStream,
@@ -34,8 +39,8 @@ struct Packet(Vec<u8>);
 
 impl Packet {
     pub fn read_stream(stream: &mut TcpStream, state: &State) -> Result<Self, ProtocolError> {
-        let length = VarInt::read_from(stream)?;
-        if length.0 == 0 {
+        let VarInt(length) = VarInt::read_from(stream)?;
+        if length == 0 {
             trace!("length is 0, most likely EOF");
             return Err(ProtocolError::IOError(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
@@ -45,12 +50,12 @@ impl Packet {
 
         // for my beloved, legacy stuff
         // modern handshake shouldn't be 0xFE long, so this should be good enough of a check
-        if length.0 == 0xFE && state == &State::Handshaking {
+        if length == 0xFE && state == &State::Handshaking {
             trace!("unimplemented");
             return Err(ProtocolError::Unimplemented);
         }
 
-        let mut buffer = vec![0; length.0 as usize];
+        let mut buffer = vec![0; length as usize];
         match stream.read_exact(&mut buffer[..]) {
             Ok(_) => (),
             Err(e) => {
@@ -97,6 +102,7 @@ impl ClientBound {
     }
 }
 
+/// `ServerBound` represents the states in which the packet is in.
 pub enum ServerBound {
     Handshake(HandshakingServerBound),
     Status(StatusServerBound),
