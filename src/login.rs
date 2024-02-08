@@ -34,16 +34,16 @@ impl LoginClientBound {
     {
         match self {
             Self::Disconnect(packet) => packet.write_to(writer),
-            Self::EncryptionRequest(packet) => {
+            Self::EncryptionRequest(_packet) => {
                 trace!("unimplemented");
                 Err(ProtocolError::Unimplemented)
             }
             Self::LoginSuccess(packet) => packet.write_to(writer),
-            Self::SetCompression(packet) => {
+            Self::SetCompression(_packet) => {
                 trace!("unimplemented");
                 Err(ProtocolError::Unimplemented)
             }
-            Self::LoginPluginRequest(packet) => {
+            Self::LoginPluginRequest(_packet) => {
                 trace!("unimplemented");
                 Err(ProtocolError::Unimplemented)
             }

@@ -28,7 +28,12 @@ impl DataType for VarInt {
             let byte = match reader.read_u8() {
                 Ok(b) => b,
                 Err(e) => {
-                    error!("{:?}", e);
+                    let mut buf = vec![];
+                    reader.read_to_end(&mut buf);
+                    error!(
+                        "{:?} \n  | result: {} | shift: {} | reader: {:?}",
+                        e, result, shift, buf
+                    );
                     return Err(ProtocolError::Missing);
                 }
             };
@@ -36,7 +41,7 @@ impl DataType for VarInt {
             result |= ((byte & 0x7F) as i32) << shift;
             shift += 7;
 
-            trace!("RESULT INT {:?}", result);
+            // trace!("RESULT INT {:?}", result);
             if byte & 0x80 == 0 {
                 break;
             }

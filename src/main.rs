@@ -12,7 +12,7 @@ mod status;
 
 // use status::Status;
 use thiserror::Error;
-use tokio::net::TcpListener;
+
 use tracing::{error, info, trace};
 
 // use crate::{
@@ -94,7 +94,8 @@ async fn main() -> anyhow::Result<()> {
     loop {
         let (stream, addr) = listener.accept().await?;
         tokio::spawn(async move {
-            info!("CLIENT STREAM | {:?}", stream);
+            info!("Client connected from: {:?}", addr);
+            trace!("Client Stream: {:?}", stream);
             client::Client::new(stream, addr).handle().await;
         })
         .await?;

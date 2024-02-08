@@ -4,7 +4,7 @@
 //! If you are unfamiliar, the Minecraft protocol is split into 4 states,
 //! being `Handshake`, `Status`, `Login`, and `Play`
 use std::{
-    io::{Read, Write},
+    io::{Cursor, Read, Write},
     net::TcpStream,
 };
 
@@ -19,14 +19,15 @@ use crate::{
     ProtocolError, State,
 };
 
-trait PacketClientBound {
-    fn write_to<W: Write>(&self, writer: W) -> Result<usize, ProtocolError>;
+pub trait PacketClientBound {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<usize, ProtocolError>;
 }
 
-trait PacketServerBound: Sized {
+pub trait PacketServerBound: Sized {
     fn read_from<R: Read>(reader: R) -> Result<Self, ProtocolError>;
 }
 
+#[derive(Debug)]
 struct Packet(Vec<u8>);
 // TODO list
 // - trait for writing and reading from and to stream
@@ -69,11 +70,12 @@ impl Packet {
         Ok(Self(buffer))
     }
 
-    pub fn write_stream(stream: &mut TcpStream) -> Result<usize, ProtocolError> {
+    pub fn write_stream(_stream: &mut TcpStream) -> Result<usize, ProtocolError> {
         Err(ProtocolError::Unimplemented)
     }
 }
 
+#[derive(Debug)]
 pub enum ClientBound {
     Status(StatusClientBound),
     Login(LoginClientBound),
@@ -81,8 +83,9 @@ pub enum ClientBound {
 }
 
 impl ClientBound {
-    pub fn parse_packet(
-        stream: &mut TcpStream,
+    pub fn create_reply(
+        // is this even needed?
+        // stream: &mut tokio::net::TcpStream,
         state: &State,
         request: ServerBound,
     ) -> Result<Self, ProtocolError> {
@@ -97,12 +100,38 @@ impl ClientBound {
         }
     }
 
-    pub fn write_to(&self, stream: &mut TcpStream) -> Result<usize, ProtocolError> {
-        Err(ProtocolError::Unimplemented)
+    pub async fn write_to(
+        &self,
+        stream: &mut tokio::net::TcpStream,
+    ) -> Result<usize, ProtocolError> {
+        let mut reply_bytes: Vec<u8> = vec![];
+        let mut cursor = Cursor::new(&mut reply_bytes);
+
+        match self {
+            ClientBound::Status(res) => res.write_to(&mut cursor),
+            ClientBound::Login(_) => todo!(),
+            ClientBound::Play(_) => todo!(),
+        }?;
+
+        Ok(stream.try_write(&reply_bytes)?)
+    }
+
+    pub fn encode(self) -> Result<Vec<u8>, ProtocolError> {
+        let mut encoded_packet: Vec<u8> = vec![];
+        let mut cursor = Cursor::new(&mut encoded_packet);
+
+        match self {
+            ClientBound::Status(res) => res.write_to(&mut cursor),
+            ClientBound::Login(_) => todo!(),
+            ClientBound::Play(_) => todo!(),
+        }?;
+
+        Ok(encoded_packet)
     }
 }
 
 /// `ServerBound` represents the states in which the packet is in.
+#[derive(Debug)]
 pub enum ServerBound {
     Handshake(HandshakingServerBound),
     Status(StatusServerBound),

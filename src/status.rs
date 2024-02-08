@@ -4,41 +4,59 @@ use std::{
 };
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 
 use crate::{
     data_types::{DataType, ProtocolString, VarInt},
+    packet::PacketClientBound,
     ProtocolError,
 };
 use crate::{packet::ServerBound, server_status::ServerStatus};
 
+#[derive(Debug)]
 pub enum StatusClientBound {
     StatusResponse(StatusResponse),
     PingResponse(PingResponse),
 }
 
-impl StatusClientBound {}
-
-impl StatusClientBound {
-    pub fn write_to(&self, stream: &mut TcpStream) -> Result<usize, ProtocolError> {
+impl PacketClientBound for StatusClientBound {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<usize, ProtocolError> {
         match self {
             StatusClientBound::StatusResponse(StatusResponse { json_response }) => {
                 let mut buffer = vec![];
 
-                let packet_id = VarInt(0);
+                let packet_id = VarInt(0x00);
                 let packet_length = VarInt((packet_id.size() + json_response.size()) as i32);
 
                 packet_length.write_to(&mut buffer)?;
                 packet_id.write_to(&mut buffer)?;
                 json_response.write_to(&mut buffer)?;
 
-                stream.write_all(&buffer)?;
+                writer.write_all(&buffer)?;
 
                 Ok(buffer.len())
             }
-            StatusClientBound::PingResponse(req) => Err(ProtocolError::Unimplemented),
+            StatusClientBound::PingResponse(res) => {
+                let mut buffer = vec![];
+
+                let packet_id = VarInt(0x01);
+                let packet_length = VarInt((packet_id.size() + U64_SIZE_IN_BYTES) as i32);
+
+                packet_length.write_to(&mut buffer)?;
+                packet_id.write_to(&mut buffer)?;
+                res.write_to(&mut buffer)?;
+
+                writer.write_all(&buffer)?;
+
+                Ok(buffer.len())
+            }
         }
     }
+}
+
+impl StatusClientBound {
+    // pub fn write_to(&self, stream: &mut TcpStream) -> Result<usize, ProtocolError> {
+    // }
 
     pub fn from_request(request: ServerBound) -> Result<Self, ProtocolError> {
         match request {
@@ -63,6 +81,7 @@ impl StatusClientBound {
     }
 }
 
+#[derive(Debug)]
 pub struct StatusResponse {
     json_response: ProtocolString,
 }
@@ -94,16 +113,21 @@ impl StatusResponse {
     }
 }
 
+#[derive(Debug)]
 pub struct PingResponse {
     payload: u64,
 }
 
 impl PingResponse {
-    fn write_to(&self, stream: &mut TcpStream) -> Result<usize, ProtocolError> {
-        Err(ProtocolError::Unimplemented)
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<usize, ProtocolError> {
+        let payload = self.payload;
+        writer.write_u64::<BigEndian>(payload);
+
+        Ok(U64_SIZE_IN_BYTES)
     }
 }
 
+#[derive(Debug)]
 pub enum StatusServerBound {
     StatusRequest(StatusRequest),
     PingRequest(PingRequest),
@@ -114,22 +138,27 @@ impl StatusServerBound {
         let length = VarInt::read_from(reader)?.0 as usize;
 
         let packet_id = VarInt::read_from(reader)?;
+        trace!("Status Packet ID: {:?}", packet_id);
 
         let mut buffer = vec![0; length - packet_id.size()];
         reader.read_exact(&mut buffer)?;
+        trace!("Buffer: {:?}", buffer);
+
+        let mut cursor = Cursor::new(&mut buffer);
 
         match packet_id {
-            VarInt(0x00) => Ok(Self::StatusRequest(StatusRequest::read_from(reader)?)),
-            VarInt(0x01) => Ok(Self::PingRequest(PingRequest::read_from(reader)?)),
+            VarInt(0x00) => Ok(Self::StatusRequest(StatusRequest::read_from(&mut cursor)?)),
+            VarInt(0x01) => Ok(Self::PingRequest(PingRequest::read_from(&mut cursor)?)),
             VarInt(n) => Err(ProtocolError::PacketId(n)),
         }
     }
 }
 
+#[derive(Debug)]
 pub struct StatusRequest {}
 
 impl StatusRequest {
-    pub fn read_from<R>(reader: &mut R) -> Result<Self, ProtocolError>
+    pub fn read_from<R>(_reader: &mut R) -> Result<Self, ProtocolError>
     where
         R: Read,
     {
@@ -138,6 +167,7 @@ impl StatusRequest {
     }
 }
 
+#[derive(Debug)]
 pub struct PingRequest {
     payload: u64,
 }
@@ -148,6 +178,7 @@ impl PingRequest {
         R: Read,
     {
         let payload = reader.read_u64::<BigEndian>()?;
+        trace!("payload: {}", payload);
         Ok(Self { payload })
     }
 }

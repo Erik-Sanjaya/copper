@@ -1,9 +1,5 @@
-use std::{
-    io::{Cursor, Read},
-    net::TcpStream,
-};
-
 use byteorder::{BigEndian, ReadBytesExt};
+use std::io::{Cursor, Read};
 use tracing::trace;
 
 use crate::{
@@ -14,6 +10,8 @@ use crate::{
 #[derive(Debug)]
 pub enum HandshakingServerBound {
     Handshake(Handshake),
+    // TODO
+    Legacy,
 }
 
 impl HandshakingServerBound {
@@ -23,10 +21,18 @@ impl HandshakingServerBound {
 
         let packet_id = VarInt::read_from(reader)?;
 
-        trace!("[DELETE THIS] PACKET ID {:?}", packet_id);
+        trace!("Handshaking Packet ID: {:?}", packet_id);
 
-        let mut buffer = vec![0; length - packet_id.size()];
-        reader.read_exact(&mut buffer)?;
+        let buffer_size = length - packet_id.size();
+        trace!("Buffer Size: {}", buffer_size);
+        let mut buffer = vec![0; buffer_size];
+
+        reader.read_exact(&mut buffer[..])?;
+        trace!("Buffer: {:?}", buffer);
+
+        if buffer.len() != buffer_size {
+            return Err(ProtocolError::Malformed);
+        }
 
         let mut cursor = Cursor::new(buffer);
 
@@ -47,7 +53,7 @@ pub struct Handshake {
     protocol_version: VarInt,
     server_address: ProtocolString,
     server_port: u16,
-    next_state: HandshakingNextState,
+    get_next_state: HandshakingNextState,
 }
 
 impl Handshake {
@@ -56,8 +62,11 @@ impl Handshake {
         R: Read,
     {
         let protocol_version = VarInt::read_from(reader)?;
+        trace!("Protocol Version: {:?}", protocol_version);
         let server_address = ProtocolString::read_from(reader)?;
+        trace!("Server Address: {:?}", protocol_version);
         let server_port = reader.read_u16::<BigEndian>()?;
+        trace!("Server Port: {:?}", protocol_version);
         let next_state = match VarInt::read_from(reader)? {
             VarInt(1) => HandshakingNextState::Status,
             VarInt(2) => HandshakingNextState::Login,
@@ -68,15 +77,19 @@ impl Handshake {
             protocol_version,
             server_address,
             server_port,
-            next_state,
+            get_next_state: next_state,
         })
     }
 
-    fn legacy<R>(reader: &mut R) -> Result<Self, ProtocolError>
+    fn legacy<R>(_reader: &mut R) -> Result<Self, ProtocolError>
     where
         R: Read,
     {
         unimplemented!()
+    }
+
+    pub fn get_next_state(&self) -> HandshakingNextState {
+        return self.get_next_state.clone();
     }
 }
 
@@ -86,10 +99,10 @@ pub struct Handshaking {
     protocol_version: VarInt,
     server_address: String,
     server_port: u16,
-    pub next_state: HandshakingNextState,
+    next_state: HandshakingNextState,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum HandshakingNextState {
     Status = 1,
     Login = 2,
