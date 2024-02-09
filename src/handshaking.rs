@@ -53,7 +53,7 @@ pub struct Handshake {
     protocol_version: VarInt,
     server_address: ProtocolString,
     server_port: u16,
-    get_next_state: HandshakingNextState,
+    next_state: HandshakingNextState,
 }
 
 impl Handshake {
@@ -77,7 +77,7 @@ impl Handshake {
             protocol_version,
             server_address,
             server_port,
-            get_next_state: next_state,
+            next_state,
         })
     }
 
@@ -89,7 +89,7 @@ impl Handshake {
     }
 
     pub fn get_next_state(&self) -> HandshakingNextState {
-        return self.get_next_state.clone();
+        return self.next_state.clone();
     }
 }
 

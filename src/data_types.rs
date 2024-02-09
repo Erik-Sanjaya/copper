@@ -124,3 +124,13 @@ impl From<String> for ProtocolString {
         }
     }
 }
+
+impl From<&str> for ProtocolString {
+    fn from(value: &str) -> Self {
+        let length = VarInt(value.len() as i32);
+        Self {
+            length,
+            string: value.into(),
+        }
+    }
+}

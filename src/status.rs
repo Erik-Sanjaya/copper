@@ -55,9 +55,6 @@ impl PacketClientBound for StatusClientBound {
 }
 
 impl StatusClientBound {
-    // pub fn write_to(&self, stream: &mut TcpStream) -> Result<usize, ProtocolError> {
-    // }
-
     pub fn from_request(request: ServerBound) -> Result<Self, ProtocolError> {
         match request {
             ServerBound::Status(req) => match req {
@@ -97,6 +94,7 @@ impl StatusResponse {
             StatusServerBound::PingRequest(_) => Err(ProtocolError::Malformed),
         }
     }
+
     fn write_to(&self, stream: &mut TcpStream) -> Result<usize, ProtocolError> {
         let mut response_buffer = vec![];
 

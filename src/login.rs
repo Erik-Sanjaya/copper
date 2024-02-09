@@ -1,11 +1,13 @@
 use std::io::{Cursor, Read, Write};
 
 use byteorder::ReadBytesExt;
-use tracing::trace;
+use serde_json::json;
+use tracing::{error, trace};
 use uuid::Uuid;
 
 use crate::{
     data_types::{DataType, ProtocolString, VarInt},
+    packet::ServerBound,
     ProtocolError,
 };
 
@@ -49,6 +51,31 @@ impl LoginClientBound {
             }
         }
     }
+
+    pub fn from_request(request: ServerBound) -> Result<Self, ProtocolError> {
+        // match request {
+
+        // }
+
+        match request {
+            ServerBound::Login(req) => match req {
+                LoginServerBound::LoginStart(req) => Ok(Self::Disconnect(Disconnect {
+                    reason: ProtocolString::from(
+                        json!({
+                            "text": "Disconnected cuz yeah"
+                        })
+                        .to_string(),
+                    ),
+                })),
+                LoginServerBound::EncryptionResponse(_) => Err(ProtocolError::Unimplemented),
+                _ => Err(ProtocolError::Unimplemented),
+            },
+            _ => {
+                error!("why would the request be in another state? should be impossible.");
+                Err(ProtocolError::Internal)
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -60,6 +87,7 @@ impl Disconnect {
     pub fn new(reason: ProtocolString) -> Self {
         Self { reason }
     }
+
     fn write_to<W>(&self, writer: &mut W) -> Result<usize, ProtocolError>
     where
         W: Write,
@@ -160,11 +188,22 @@ pub enum LoginServerBound {
 }
 
 impl LoginServerBound {
-    pub fn read_from(cursor: &mut Cursor<&[u8]>) -> Result<Self, ProtocolError> {
-        let packet_id = VarInt::read_from(cursor)?;
+    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
+        let length = VarInt::read_from(reader)?.0 as usize;
+
+        let packet_id = VarInt::read_from(reader)?;
+        trace!("Login Packet ID: {:?}", packet_id);
+
+        let mut buffer = vec![0; length - packet_id.size()];
+        reader.read_exact(&mut buffer)?;
+        trace!("Buffer: {:?}", buffer);
+
+        let mut cursor = Cursor::new(&mut buffer);
 
         match packet_id {
-            VarInt(0x00) => Ok(LoginServerBound::LoginStart(LoginStart::read_from(cursor)?)),
+            VarInt(0x00) => Ok(LoginServerBound::LoginStart(LoginStart::read_from(
+                &mut cursor,
+            )?)),
             VarInt(0x01) => {
                 trace!("unimplemented");
                 Err(ProtocolError::Unimplemented)
@@ -187,13 +226,13 @@ pub struct LoginStart {
 }
 
 impl LoginStart {
-    fn read_from(cursor: &mut Cursor<&[u8]>) -> Result<Self, ProtocolError> {
-        let name = ProtocolString::read_from(cursor)?;
-        let has_player_uuid = cursor.read_u8()? != 0;
+    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
+        let name = ProtocolString::read_from(reader)?;
+        let has_player_uuid = reader.read_u8()? != 0;
 
         let player_uuid = {
             let mut rest_of_bytes = vec![];
-            match cursor.read_to_end(&mut rest_of_bytes)? {
+            match reader.read_to_end(&mut rest_of_bytes)? {
                 0 => None,
                 16 => {
                     let buffer_for_uuid = rest_of_bytes[..16]

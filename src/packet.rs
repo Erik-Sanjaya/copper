@@ -95,7 +95,7 @@ impl ClientBound {
                 Err(ProtocolError::Internal)
             }
             State::Status => Ok(Self::Status(StatusClientBound::from_request(request)?)),
-            State::Login => Err(ProtocolError::Unimplemented),
+            State::Login => Ok(Self::Login(LoginClientBound::from_request(request)?)),
             State::Play => Err(ProtocolError::Unimplemented),
         }
     }
@@ -122,7 +122,7 @@ impl ClientBound {
 
         match self {
             ClientBound::Status(res) => res.write_to(&mut cursor),
-            ClientBound::Login(_) => todo!(),
+            ClientBound::Login(res) => res.write_to(&mut cursor),
             ClientBound::Play(_) => todo!(),
         }?;
 
@@ -144,12 +144,9 @@ impl ServerBound {
         match state {
             State::Handshaking => Ok(Self::Handshake(HandshakingServerBound::read_from(reader)?)),
             State::Status => Ok(Self::Status(StatusServerBound::read_from(reader)?)),
-            State::Login => {
-                trace!("unimplemented");
-                Err(ProtocolError::Unimplemented)
-            }
+            State::Login => Ok(Self::Login(LoginServerBound::read_from(reader)?)),
             State::Play => {
-                trace!("unimplemented");
+                error!("unimplemented");
                 Err(ProtocolError::Unimplemented)
             }
         }
