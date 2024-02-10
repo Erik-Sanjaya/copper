@@ -1,8 +1,14 @@
+use std::collections::VecDeque;
+use std::io::{ErrorKind, Read};
 use std::{io::Cursor, net::SocketAddr};
 
+use tokio::io::AsyncReadExt;
+use tokio::io::Interest;
+// use tokio::io::TryStream;
 use tokio::net::TcpStream;
 use tracing::debug;
 use tracing::error;
+use tracing::info;
 use tracing::trace;
 
 use crate::handshaking::HandshakingNextState;
@@ -18,7 +24,7 @@ pub struct Client {
     addr: SocketAddr,
     stream: TcpStream,
     state: State,
-    buffer: Vec<u8>,
+    buffer: VecDeque<u8>,
     connected: bool,
 }
 
@@ -28,7 +34,8 @@ impl Client {
             addr,
             stream,
             state: State::Handshaking,
-            buffer: Vec::new(),
+            // vecdeque because the bytes are one time read only, so it's fine if its not contiguous for cache hit
+            buffer: VecDeque::new(),
             connected: true,
         }
     }
@@ -44,39 +51,49 @@ impl Client {
             // that way the program wont just keep on yielding the drain
             // and have nothing else to do
 
-            trace!("draining stream");
-            self.drain_stream().await.unwrap();
+            if let Err(e) = self.drain_stream().await {
+                if e.kind() != ErrorKind::WouldBlock {
+                    // trace!("Would block.");
+                    // tokio::task::yield_now();
+                    error!("Error from draining stream: {:?}", e);
+                    panic!("Error from draining stream: {:?}", e);
+                }
+            }
 
-            // tokio::select! {
-            // _ = self.drain_stream() => {
-            //    // self.read_stream().await;
-            // }
-            // }
-
-            trace!("replying packets");
-            self.reply().await;
+            if !self.buffer.is_empty() {
+                self.reply().await;
+            }
         }
     }
 
     async fn reply(&mut self) {
+        trace!("replying packets");
         if self.buffer.is_empty() {
             trace!("buffer is empty");
             return;
         }
 
-        let (packet, bytes_read) = match self.read_stream().await {
-            Ok(item) => item,
+        // let (packet, bytes_read) = match self.read_stream().await {
+        //     Ok(item) => item,
+        //     Err(e) => {
+        //         error!("{:?}", e);
+        //         panic!();
+        //     }
+        // };
+
+        // self.buffer.drain(0..bytes_read);
+
+        let packet = match self.read_stream().await {
+            Ok(packet) => packet,
             Err(e) => {
                 error!("{:?}", e);
                 panic!();
             }
         };
 
-        self.buffer.drain(0..bytes_read);
-
         match packet {
             ServerBound::Handshake(req) => {
-                trace!("Handshake Packet Incoming: {:?}", req);
+                info!("Handshake Packet Incoming: {:?}", req);
                 if let HandshakingServerBound::Handshake(handshake) = req {
                     let next_state = handshake.get_next_state();
                     match next_state {
@@ -86,11 +103,11 @@ impl Client {
                 }
             }
             ServerBound::Status(req) => {
-                trace!("Status Packet Incoming: {:?}", req);
+                info!("Status Packet Incoming: {:?}", req);
                 let reply_packet =
                     ClientBound::create_reply(&self.state, ServerBound::Status(req)).unwrap();
 
-                trace!("Status reply packet: {:?}", reply_packet);
+                info!("Status reply packet: {:?}", reply_packet);
 
                 // check if it's a ping response
                 // client doesn't do anything else after this so it's safe to terminate
@@ -107,11 +124,11 @@ impl Client {
             }
 
             ServerBound::Login(req) => {
-                trace!("Login Packet Incoming: {:?}", req);
+                info!("Login Packet Incoming: {:?}", req);
                 let reply_packet =
                     ClientBound::create_reply(&self.state, ServerBound::Login(req)).unwrap();
 
-                trace!("Login reply packet: {:?}", reply_packet);
+                info!("Login reply packet: {:?}", reply_packet);
 
                 let reply_bytes = reply_packet.encode().unwrap();
 
@@ -124,36 +141,55 @@ impl Client {
         };
     }
 
-    pub async fn read_stream(&mut self) -> Result<(ServerBound, usize), ProtocolError> {
-        let mut temp_cursor = Cursor::new(&self.buffer);
+    pub async fn read_stream(&mut self) -> Result<ServerBound, ProtocolError> {
+        // let mut buf = &self.buffer;
+        // let test = VecDeque::new();
+        // test.read()
 
-        Ok((
-            ServerBound::parse_packet(&mut temp_cursor, &self.state)?,
-            temp_cursor.position() as usize,
-        ))
+        Ok(ServerBound::parse_packet(&mut self.buffer, &self.state)?)
     }
 
     /// Drain the whole stream and move it to the client's internal buffer
     async fn drain_stream(&mut self) -> Result<(), std::io::Error> {
-        loop {
-            let mut buffer = [0; 128];
+        trace!("draining stream");
+        // loop {
+        //     let mut buffer = [0; 128];
 
-            match self.stream.try_read(&mut buffer) {
-                Ok(bytes_read) => {
-                    trace!("Bytes read: {:?}", bytes_read);
-                    if bytes_read == 0 {
-                        self.connected = false; // Stream is closed
-                        break;
-                    }
+        //     match self.stream.try_read(&mut buffer) {
+        //         Ok(bytes_read) => {
+        //             trace!("Bytes read: {:?}", bytes_read);
+        //             if bytes_read == 0 {
+        //                 self.connected = false; // Stream is closed
+        //                 break;
+        //             }
 
-                    self.buffer.extend_from_slice(&buffer[..bytes_read]);
+        //             self.buffer.extend_from_slice(&buffer[..bytes_read]);
+        //         }
+        //         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+        //             trace!("would block, break");
+        //             break;
+        //         }
+        //         Err(err) => return Err(err), // Forward other errors
+        //     }
+        // }
+
+        let mut buffer: Vec<u8> = vec![0; 128];
+
+        match self.stream.try_read(&mut buffer) {
+            Ok(bytes_read) => {
+                trace!("Bytes read: {:?}", bytes_read);
+                if bytes_read == 0 {
+                    self.connected = false; // Stream is closed
                 }
-                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                    trace!("would block, break");
-                    break;
-                }
-                Err(err) => return Err(err), // Forward other errors
+
+                // self.buffer.extend_from_slice(&buffer[..bytes_read]);
+                self.buffer.extend(&buffer[..bytes_read]);
             }
+            // Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+            //     trace!("would block, yield");
+            //     tokio::task::yield_now().await;
+            // }
+            Err(err) => return Err(err), // Forward other errors
         }
 
         Ok(())

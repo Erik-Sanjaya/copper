@@ -53,20 +53,20 @@ impl LoginClientBound {
     }
 
     pub fn from_request(request: ServerBound) -> Result<Self, ProtocolError> {
-        // match request {
-
-        // }
-
         match request {
             ServerBound::Login(req) => match req {
-                LoginServerBound::LoginStart(req) => Ok(Self::Disconnect(Disconnect {
-                    reason: ProtocolString::from(
-                        json!({
-                            "text": "Disconnected cuz yeah"
-                        })
-                        .to_string(),
-                    ),
-                })),
+                LoginServerBound::LoginStart(req) => {
+                    Ok(Self::Disconnect(Disconnect {
+                        reason: ProtocolString::from(
+                            json!({
+                                "text": "Disconnected cuz yeah"
+                            })
+                            .to_string(),
+                        ),
+                    }))
+
+                    // Ok(Self::LoginSuccess(LoginSuccess { uuid: req.player_uuid.unwrap(), username: req.name, number_of_properties: VarInt(4), name: , value: , is_signed: , signature:  }))
+                }
                 LoginServerBound::EncryptionResponse(_) => Err(ProtocolError::Unimplemented),
                 _ => Err(ProtocolError::Unimplemented),
             },
