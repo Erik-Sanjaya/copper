@@ -4,7 +4,6 @@ use std::{io::Cursor, net::SocketAddr};
 
 use tokio::io::AsyncReadExt;
 use tokio::io::Interest;
-// use tokio::io::TryStream;
 use tokio::net::TcpStream;
 use tracing::debug;
 use tracing::error;
@@ -13,6 +12,7 @@ use tracing::trace;
 
 use crate::handshaking::HandshakingNextState;
 use crate::handshaking::HandshakingServerBound;
+use crate::login::LoginClientBound;
 use crate::packet::ClientBound;
 use crate::packet::ServerBound;
 use crate::status::Status;
@@ -83,13 +83,20 @@ impl Client {
 
         // self.buffer.drain(0..bytes_read);
 
-        let packet = match self.read_stream().await {
+        let packet = match ServerBound::parse_packet(&mut self.buffer, &self.state) {
             Ok(packet) => packet,
             Err(e) => {
                 error!("{:?}", e);
                 panic!();
             }
         };
+        // let packet = match self.read_stream().await {
+        //     Ok(packet) => packet,
+        //     Err(e) => {
+        //         error!("{:?}", e);
+        //         panic!();
+        //     }
+        // };
 
         match packet {
             ServerBound::Handshake(req) => {
@@ -128,6 +135,10 @@ impl Client {
                 let reply_packet =
                     ClientBound::create_reply(&self.state, ServerBound::Login(req)).unwrap();
 
+                if let ClientBound::Login(LoginClientBound::LoginSuccess(_)) = reply_packet {
+                    self.state = State::Play;
+                }
+
                 info!("Login reply packet: {:?}", reply_packet);
 
                 let reply_bytes = reply_packet.encode().unwrap();
@@ -137,42 +148,21 @@ impl Client {
                 debug!("Login packet written");
                 trace!("Packet bytes: {:?}", reply_bytes);
             }
-            ServerBound::Play(_req) => unimplemented!(),
+            ServerBound::Play(req) => {
+                info!("Play Packet Incoming: {:?}", req);
+                let reply_packet =
+                    ClientBound::create_reply(&self.state, ServerBound::Play(req)).unwrap();
+            }
         };
     }
 
     pub async fn read_stream(&mut self) -> Result<ServerBound, ProtocolError> {
-        // let mut buf = &self.buffer;
-        // let test = VecDeque::new();
-        // test.read()
-
-        Ok(ServerBound::parse_packet(&mut self.buffer, &self.state)?)
+        ServerBound::parse_packet(&mut self.buffer, &self.state)
     }
 
     /// Drain the whole stream and move it to the client's internal buffer
     async fn drain_stream(&mut self) -> Result<(), std::io::Error> {
         trace!("draining stream");
-        // loop {
-        //     let mut buffer = [0; 128];
-
-        //     match self.stream.try_read(&mut buffer) {
-        //         Ok(bytes_read) => {
-        //             trace!("Bytes read: {:?}", bytes_read);
-        //             if bytes_read == 0 {
-        //                 self.connected = false; // Stream is closed
-        //                 break;
-        //             }
-
-        //             self.buffer.extend_from_slice(&buffer[..bytes_read]);
-        //         }
-        //         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-        //             trace!("would block, break");
-        //             break;
-        //         }
-        //         Err(err) => return Err(err), // Forward other errors
-        //     }
-        // }
-
         let mut buffer: Vec<u8> = vec![0; 128];
 
         match self.stream.try_read(&mut buffer) {
@@ -182,13 +172,8 @@ impl Client {
                     self.connected = false; // Stream is closed
                 }
 
-                // self.buffer.extend_from_slice(&buffer[..bytes_read]);
                 self.buffer.extend(&buffer[..bytes_read]);
             }
-            // Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-            //     trace!("would block, yield");
-            //     tokio::task::yield_now().await;
-            // }
             Err(err) => return Err(err), // Forward other errors
         }
 

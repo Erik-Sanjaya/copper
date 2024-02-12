@@ -23,8 +23,8 @@ pub trait PacketClientBound {
     fn write_to<W: Write>(&self, writer: &mut W) -> Result<usize, ProtocolError>;
 }
 
-pub trait PacketServerBound: Sized {
-    fn read_from<R: Read>(reader: R) -> Result<Self, ProtocolError>;
+pub trait PacketServerBound {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError>;
 }
 
 #[derive(Debug)]

@@ -7,18 +7,8 @@ mod play;
 mod server_status;
 mod status;
 
-// use data_types::{DataType, VarInt};
-// use packet::ServerBound;
-
-// use status::Status;
 use thiserror::Error;
-
 use tracing::{error, info, trace};
-
-// use crate::{
-//     handshaking::{Handshaking, HandshakingNextState},
-//     packet::ClientBound,
-// };
 
 #[derive(Debug, Error)]
 pub enum ProtocolError {
@@ -64,10 +54,6 @@ pub enum State {
     Login,
     Play,
 }
-
-// fn handle_socket(mut stream: TcpStream, addr: SocketAddr) -> Result<(), ProtocolError> {
-//     Err(ProtocolError::Unimplemented)
-// }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

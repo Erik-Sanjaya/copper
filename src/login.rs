@@ -56,16 +56,21 @@ impl LoginClientBound {
         match request {
             ServerBound::Login(req) => match req {
                 LoginServerBound::LoginStart(req) => {
-                    Ok(Self::Disconnect(Disconnect {
-                        reason: ProtocolString::from(
-                            json!({
-                                "text": "Disconnected cuz yeah"
-                            })
-                            .to_string(),
-                        ),
-                    }))
+                    // Ok(Self::Disconnect(Disconnect {
+                    //     reason: ProtocolString::from(
+                    //         json!({
+                    //             "text": "Disconnected cuz yeah"
+                    //         })
+                    //         .to_string(),
+                    //     ),
+                    // }))
 
-                    // Ok(Self::LoginSuccess(LoginSuccess { uuid: req.player_uuid.unwrap(), username: req.name, number_of_properties: VarInt(4), name: , value: , is_signed: , signature:  }))
+                    Ok(Self::LoginSuccess(LoginSuccess {
+                        uuid: req.player_uuid.unwrap(),
+                        username: req.name,
+                        number_of_properties: VarInt(0),
+                        property: vec![],
+                    }))
                 }
                 LoginServerBound::EncryptionResponse(_) => Err(ProtocolError::Unimplemented),
                 _ => Err(ProtocolError::Unimplemented),
@@ -124,10 +129,15 @@ pub struct LoginSuccess {
     // how i'm supposed to represent the array in the stream yet, so i'll just
     // leave it like this for now. hopefully before the next commit i can delete
     // this comment
-    pub name: Option<ProtocolString>,
-    pub value: Option<ProtocolString>,
-    pub is_signed: Option<bool>,
-    pub signature: Option<ProtocolString>,
+    property: Vec<Property>,
+}
+
+#[derive(Debug)]
+struct Property {
+    name: ProtocolString,
+    value: ProtocolString,
+    is_signed: bool,
+    signature: ProtocolString,
 }
 
 impl LoginSuccess {
@@ -135,11 +145,7 @@ impl LoginSuccess {
     where
         W: Write,
     {
-        if self.name.is_some()
-            || self.value.is_some()
-            || self.is_signed.is_some()
-            || self.signature.is_some()
-        {
+        if !self.property.is_empty() {
             trace!("unimplemented");
             return Err(ProtocolError::Unimplemented);
         }
