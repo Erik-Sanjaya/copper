@@ -1,7 +1,4 @@
-use std::{
-    io::{Cursor, Read, Write},
-    net::TcpStream,
-};
+use std::io::{Cursor, Read, Write};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use tracing::{error, trace};
@@ -55,24 +52,19 @@ impl Encodable for ClientBound {
 }
 
 impl ClientBound {
-    pub fn from_request(request: packet::ServerBound) -> Result<Self, ProtocolError> {
-        if let packet::ServerBound::Status(req) = request {
-            match req {
-                ServerBound::StatusRequest(_) => {
-                    let server_status = ServerStatus::get_example();
-                    let status_string = serde_json::to_string(&server_status)?;
+    pub fn from_request(request: ServerBound) -> Result<Self, ProtocolError> {
+        match request {
+            ServerBound::StatusRequest(_) => {
+                let server_status = ServerStatus::get_example();
+                let status_string = serde_json::to_string(&server_status)?;
 
-                    Ok(Self::StatusResponse(StatusResponse {
-                        json_response: ProtocolString::try_from(status_string)?,
-                    }))
-                }
-                ServerBound::PingRequest(PingRequest { payload }) => {
-                    Ok(Self::PingResponse(PingResponse { payload }))
-                }
+                Ok(Self::StatusResponse(StatusResponse {
+                    json_response: ProtocolString::try_from(status_string)?,
+                }))
             }
-        } else {
-            error!("why would the request be in another state? should be impossible.");
-            Err(ProtocolError::Internal)
+            ServerBound::PingRequest(PingRequest { payload }) => {
+                Ok(Self::PingResponse(PingResponse { payload }))
+            }
         }
     }
 }
@@ -131,8 +123,8 @@ pub enum ServerBound {
     PingRequest(PingRequest),
 }
 
-impl ServerBound {
-    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
+impl Decodable for ServerBound {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
         let length = VarInt::read_from(reader)?;
         let length = usize::try_from(length.0)?;
 

@@ -79,15 +79,25 @@ impl ClientBound {
         state: &State,
         request: ServerBound,
     ) -> Result<Self, ProtocolError> {
-        match state {
-            State::Handshaking => {
+        match request {
+            ServerBound::Handshake(req) => {
                 error!("Handshaking packet for clientbound?");
                 Err(ProtocolError::Internal)
             }
-            State::Status => Ok(Self::Status(status::ClientBound::from_request(request)?)),
-            State::Login => Ok(Self::Login(login::ClientBound::from_request(request)?)),
-            State::Play => Err(ProtocolError::Unimplemented),
+            ServerBound::Status(req) => Ok(Self::Status(status::ClientBound::from_request(req)?)),
+            ServerBound::Login(req) => Ok(Self::Login(login::ClientBound::from_request(req)?)),
+            ServerBound::Play(req) => Ok(Self::Play(play::ClientBound::from_request(req)?)),
         }
+
+        // match state {
+        //     State::Handshaking => {
+        //         error!("Handshaking packet for clientbound?");
+        //         Err(ProtocolError::Internal)
+        //     }
+        //     State::Status => Ok(Self::Status(status::ClientBound::from_request(request)?)),
+        //     State::Login => Ok(Self::Login(login::ClientBound::from_request(request)?)),
+        //     State::Play => Err(ProtocolError::Unimplemented),
+        // }
     }
 
     // pub fn write_to(&self, stream: &mut tokio::net::TcpStream) -> Result<usize, ProtocolError> {

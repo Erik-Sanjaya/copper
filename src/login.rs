@@ -7,7 +7,8 @@ use uuid::Uuid;
 
 use crate::{
     data_types::{DataType, ProtocolString, VarInt},
-    packet, ProtocolError,
+    packet::{self, Decodable},
+    ProtocolError,
 };
 
 // 1. C→S: Handshake with Next State set to 2 (login)
@@ -51,21 +52,16 @@ impl ClientBound {
         }
     }
 
-    pub fn from_request(request: packet::ServerBound) -> Result<Self, ProtocolError> {
-        if let packet::ServerBound::Login(req) = request {
-            match req {
-                ServerBound::LoginStart(req) => Ok(Self::LoginSuccess(LoginSuccess {
-                    // TODO dont do this
-                    uuid: req.player_uuid.unwrap_or_default(),
-                    username: req.name,
-                    number_of_properties: VarInt(0),
-                    property: vec![],
-                })),
-                _ => Err(ProtocolError::Unimplemented),
-            }
-        } else {
-            error!("why would the request be in another state? should be impossible.");
-            Err(ProtocolError::Internal)
+    pub fn from_request(request: ServerBound) -> Result<Self, ProtocolError> {
+        match request {
+            ServerBound::LoginStart(req) => Ok(Self::LoginSuccess(LoginSuccess {
+                // TODO dont do this
+                uuid: req.player_uuid.unwrap_or_default(),
+                username: req.name,
+                number_of_properties: VarInt(0),
+                property: vec![],
+            })),
+            _ => Err(ProtocolError::Unimplemented),
         }
     }
 }
@@ -178,8 +174,8 @@ pub enum ServerBound {
     LoginPluginResponse(LoginPluginResponse),
 }
 
-impl ServerBound {
-    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
+impl Decodable for ServerBound {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
         let length = VarInt::read_from(reader)?;
         let length = usize::try_from(length.0)?;
 

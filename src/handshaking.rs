@@ -4,6 +4,7 @@ use tracing::trace;
 
 use crate::{
     data_types::{DataType, ProtocolString, VarInt},
+    packet::Decodable,
     ProtocolError, State,
 };
 
@@ -14,8 +15,8 @@ pub enum ServerBound {
     Legacy(Legacy),
 }
 
-impl ServerBound {
-    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
+impl Decodable for ServerBound {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
         let VarInt(length) = VarInt::read_from(reader)?;
         let length = usize::try_from(length)?;
 
@@ -82,7 +83,7 @@ impl Handshake {
             next_state,
         })
     }
-    
+
     pub const fn get_next_state(&self) -> State {
         match self.next_state {
             NextState::Status => State::Status,
