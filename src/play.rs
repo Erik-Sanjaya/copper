@@ -1,4 +1,4 @@
 #[derive(Debug)]
-pub struct PlayServerBound;
+pub struct ServerBound;
 #[derive(Debug)]
-pub struct PlayClientBound;
+pub struct ClientBound;

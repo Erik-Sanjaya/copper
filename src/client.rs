@@ -1,23 +1,18 @@
 use std::collections::VecDeque;
-use std::io::{ErrorKind, Read};
-use std::{io::Cursor, net::SocketAddr};
+use std::io::ErrorKind;
+use std::net::SocketAddr;
 
-use tokio::io::AsyncReadExt;
-use tokio::io::Interest;
 use tokio::net::TcpStream;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::trace;
 
-use crate::handshaking::HandshakingNextState;
-use crate::handshaking::HandshakingServerBound;
-use crate::login::LoginClientBound;
-use crate::packet::ClientBound;
-use crate::packet::ServerBound;
-use crate::status::Status;
-use crate::status::StatusClientBound;
-use crate::ProtocolError;
+use crate::handshaking;
+use crate::login;
+use crate::packet;
+use crate::status;
+
 use crate::State;
 
 pub struct Client {
@@ -43,7 +38,10 @@ impl Client {
     // i think this one is allowed to consume the client
     // all the calls to the other methods come from this
     // one anyway
-    pub async fn handle(&mut self) {
+    pub fn handle(&mut self) {
+        info!("Client connected from: {:?}", self.addr);
+        trace!("Client Stream: {:?}", self.stream);
+
         while self.connected {
             // basically, have the thing be drained
             // then it should be yielding once it empties out.
@@ -51,117 +49,138 @@ impl Client {
             // that way the program wont just keep on yielding the drain
             // and have nothing else to do
 
-            if let Err(e) = self.drain_stream().await {
+            if let Err(e) = self.drain_stream() {
                 if e.kind() != ErrorKind::WouldBlock {
                     // trace!("Would block.");
                     // tokio::task::yield_now();
-                    error!("Error from draining stream: {:?}", e);
-                    panic!("Error from draining stream: {:?}", e);
+                    error!("Error from draining stream: {e:?}");
+                    panic!("Error from draining stream: {e:?}");
                 }
             }
 
             if !self.buffer.is_empty() {
-                self.reply().await;
+                let packet = match packet::ServerBound::parse_packet(&mut self.buffer, &self.state)
+                {
+                    Ok(packet) => packet,
+                    Err(e) => {
+                        error!("{:?}", e);
+                        panic!();
+                    }
+                };
+                self.reply(packet);
             }
         }
     }
 
-    async fn reply(&mut self) {
-        trace!("replying packets");
-        if self.buffer.is_empty() {
-            trace!("buffer is empty");
-            return;
-        }
-
-        // let (packet, bytes_read) = match self.read_stream().await {
-        //     Ok(item) => item,
-        //     Err(e) => {
-        //         error!("{:?}", e);
-        //         panic!();
-        //     }
-        // };
-
-        // self.buffer.drain(0..bytes_read);
-
-        let packet = match ServerBound::parse_packet(&mut self.buffer, &self.state) {
-            Ok(packet) => packet,
-            Err(e) => {
-                error!("{:?}", e);
-                panic!();
-            }
-        };
-        // let packet = match self.read_stream().await {
-        //     Ok(packet) => packet,
-        //     Err(e) => {
-        //         error!("{:?}", e);
-        //         panic!();
-        //     }
-        // };
-
-        match packet {
-            ServerBound::Handshake(req) => {
+    fn reply(&mut self, packet: packet::ServerBound) {
+        let reply_packet: Option<packet::ClientBound> = match packet {
+            packet::ServerBound::Handshake(req) => {
                 info!("Handshake Packet Incoming: {:?}", req);
-                if let HandshakingServerBound::Handshake(handshake) = req {
-                    let next_state = handshake.get_next_state();
-                    match next_state {
-                        HandshakingNextState::Status => self.state = State::Status,
-                        HandshakingNextState::Login => self.state = State::Login,
-                    }
+                if let handshaking::ServerBound::Handshake(handshake) = req {
+                    self.state = handshake.get_next_state();
                 }
-            }
-            ServerBound::Status(req) => {
-                info!("Status Packet Incoming: {:?}", req);
-                let reply_packet =
-                    ClientBound::create_reply(&self.state, ServerBound::Status(req)).unwrap();
 
-                info!("Status reply packet: {:?}", reply_packet);
+                None
+            }
+            packet::ServerBound::Status(req) => {
+                info!("Status Packet Incoming: {:?}", req);
+                let reply_packet = packet::ClientBound::create_reply(
+                    &self.state,
+                    packet::ServerBound::Status(req),
+                );
+
+                let reply_packet = match reply_packet {
+                    Ok(packet) => packet,
+                    Err(e) => {
+                        error!("Error in status packet reply: {e:?}");
+                        todo!("complete error handling");
+                    }
+                };
+
+                info!("Status reply packet: {reply_packet:?}");
 
                 // check if it's a ping response
                 // client doesn't do anything else after this so it's safe to terminate
-                if let ClientBound::Status(StatusClientBound::PingResponse(_)) = reply_packet {
+                if let packet::ClientBound::Status(status::ClientBound::PingResponse(_)) =
+                    reply_packet
+                {
                     self.connected = false;
                 }
 
-                let reply_bytes = reply_packet.encode().unwrap();
-
-                let bytes_written = self.stream.try_write(&reply_bytes).unwrap();
-
-                debug!("Status packet written");
-                trace!("Packet bytes: {:?}", reply_bytes);
+                Some(reply_packet)
             }
 
-            ServerBound::Login(req) => {
+            packet::ServerBound::Login(req) => {
                 info!("Login Packet Incoming: {:?}", req);
                 let reply_packet =
-                    ClientBound::create_reply(&self.state, ServerBound::Login(req)).unwrap();
+                    packet::ClientBound::create_reply(&self.state, packet::ServerBound::Login(req));
 
-                if let ClientBound::Login(LoginClientBound::LoginSuccess(_)) = reply_packet {
+                let reply_packet = match reply_packet {
+                    Ok(packet) => packet,
+                    Err(e) => {
+                        error!("Error in login packet reply: {e:?}");
+                        todo!("complete error handling");
+                    }
+                };
+
+                info!("Login reply packet: {reply_packet:?}");
+
+                // check if it's a login success, in which you'd transition to the next state
+                if let packet::ClientBound::Login(login::ClientBound::LoginSuccess(_)) =
+                    reply_packet
+                {
                     self.state = State::Play;
                 }
 
-                info!("Login reply packet: {:?}", reply_packet);
-
-                let reply_bytes = reply_packet.encode().unwrap();
-
-                let bytes_written = self.stream.try_write(&reply_bytes).unwrap();
-
-                debug!("Login packet written");
-                trace!("Packet bytes: {:?}", reply_bytes);
+                Some(reply_packet)
             }
-            ServerBound::Play(req) => {
+            packet::ServerBound::Play(req) => {
                 info!("Play Packet Incoming: {:?}", req);
                 let reply_packet =
-                    ClientBound::create_reply(&self.state, ServerBound::Play(req)).unwrap();
+                    packet::ClientBound::create_reply(&self.state, packet::ServerBound::Play(req));
+
+                let reply_packet = match reply_packet {
+                    Ok(packet) => packet,
+                    Err(e) => {
+                        error!("Error in login packet reply: {e:?}");
+                        todo!("complete error handling");
+                    }
+                };
+
+                Some(reply_packet)
             }
         };
+
+        let Some(reply_packet) = reply_packet else {
+            return;
+        };
+
+        let reply_bytes = match reply_packet.encode() {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                error!("Error in packet encoding: {e:?}");
+                todo!("complete error handling");
+            }
+        };
+
+        let bytes_written = match self.stream.try_write(&reply_bytes) {
+            Ok(bytes_written) => bytes_written,
+            Err(e) => {
+                error!("Error in try_write: {e:?}");
+                todo!("complete error handling");
+            }
+        };
+
+        debug!("Packet written {bytes_written} byte(s)");
+        trace!("Packet bytes: {reply_bytes:?}");
     }
 
-    pub async fn read_stream(&mut self) -> Result<ServerBound, ProtocolError> {
-        ServerBound::parse_packet(&mut self.buffer, &self.state)
-    }
+    // pub fn read_stream(&mut self) -> Result<packet::ServerBound, ProtocolError> {
+    //     packet::ServerBound::parse_packet(&mut self.buffer, &self.state)
+    // }
 
     /// Drain the whole stream and move it to the client's internal buffer
-    async fn drain_stream(&mut self) -> Result<(), std::io::Error> {
+    fn drain_stream(&mut self) -> Result<(), std::io::Error> {
         trace!("draining stream");
         let mut buffer: Vec<u8> = vec![0; 128];
 

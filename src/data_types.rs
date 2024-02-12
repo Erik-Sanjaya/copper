@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
 
-use tracing::{error, trace};
+use tracing::error;
 
 use crate::ProtocolError;
 
@@ -29,7 +29,7 @@ impl DataType for VarInt {
                 Ok(b) => b,
                 Err(e) => {
                     let mut buf = vec![];
-                    reader.read_to_end(&mut buf);
+                    reader.read_to_end(&mut buf)?;
                     error!(
                         "{:?} \n  | result: {} | shift: {} | reader: {:?}",
                         e, result, shift, buf
@@ -38,7 +38,7 @@ impl DataType for VarInt {
                 }
             };
 
-            result |= ((byte & 0x7F) as i32) << shift;
+            result |= (i32::from(byte & 0x7F)) << shift;
             shift += 7;
 
             // trace!("RESULT INT {:?}", result);
@@ -55,7 +55,7 @@ impl DataType for VarInt {
         let mut bytes = 0;
 
         loop {
-            let mut temp = (value & 0x7f) as u8;
+            let mut temp = u8::try_from(value & 0x7f)?;
             value >>= 7;
             bytes += 1;
 
@@ -87,6 +87,14 @@ impl DataType for VarInt {
     }
 }
 
+impl TryFrom<usize> for VarInt {
+    type Error = ProtocolError;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        Ok(Self(i32::try_from(value)?))
+    }
+}
+
 #[derive(Debug)]
 pub struct ProtocolString {
     pub length: VarInt,
@@ -96,7 +104,9 @@ pub struct ProtocolString {
 impl DataType for ProtocolString {
     fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
         let length = VarInt::read_from(reader)?;
-        let mut vec = vec![0; length.0 as usize];
+        let vec_len = usize::try_from(length.0)?;
+
+        let mut vec = vec![0; vec_len];
         reader.read_exact(&mut vec[..])?;
         let string = String::from_utf8(vec).map_err(|_| ProtocolError::Malformed)?;
 
@@ -115,22 +125,28 @@ impl DataType for ProtocolString {
     }
 }
 
-impl From<String> for ProtocolString {
-    fn from(value: String) -> Self {
-        let length = VarInt(value.len() as i32);
-        Self {
+impl TryFrom<String> for ProtocolString {
+    type Error = ProtocolError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let length = VarInt(i32::try_from(value.len())?);
+
+        Ok(Self {
             length,
             string: value,
-        }
+        })
     }
 }
 
-impl From<&str> for ProtocolString {
-    fn from(value: &str) -> Self {
-        let length = VarInt(value.len() as i32);
-        Self {
+impl TryFrom<&str> for ProtocolString {
+    type Error = ProtocolError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let length = VarInt(i32::try_from(value.len())?);
+
+        Ok(Self {
             length,
             string: value.into(),
-        }
+        })
     }
 }

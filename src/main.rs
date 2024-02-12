@@ -8,7 +8,7 @@ mod server_status;
 mod status;
 
 use thiserror::Error;
-use tracing::{error, info, trace};
+use tracing::error;
 
 #[derive(Debug, Error)]
 pub enum ProtocolError {
@@ -33,21 +33,29 @@ pub enum ProtocolError {
     SerdeJson(#[source] serde_json::error::Error),
     #[error("Internal error")]
     Internal,
+    #[error("TryFromInt error")]
+    TryFromInt(#[source] std::num::TryFromIntError),
 }
 
 impl From<std::io::Error> for ProtocolError {
     fn from(error: std::io::Error) -> Self {
-        ProtocolError::IOError(error)
+        Self::IOError(error)
     }
 }
 
 impl From<serde_json::error::Error> for ProtocolError {
     fn from(error: serde_json::error::Error) -> Self {
-        ProtocolError::SerdeJson(error)
+        Self::SerdeJson(error)
     }
 }
 
-#[derive(Debug, PartialEq)]
+impl From<std::num::TryFromIntError> for ProtocolError {
+    fn from(error: std::num::TryFromIntError) -> Self {
+        Self::TryFromInt(error)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum State {
     Handshaking,
     Status,
@@ -80,12 +88,8 @@ async fn main() -> anyhow::Result<()> {
     loop {
         let (stream, addr) = listener.accept().await?;
         tokio::spawn(async move {
-            info!("Client connected from: {:?}", addr);
-            trace!("Client Stream: {:?}", stream);
-            client::Client::new(stream, addr).handle().await;
+            client::Client::new(stream, addr).handle();
         })
         .await?;
     }
-
-    Ok(())
 }

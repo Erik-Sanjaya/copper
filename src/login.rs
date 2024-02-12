@@ -1,14 +1,13 @@
 use std::io::{Cursor, Read, Write};
 
 use byteorder::ReadBytesExt;
-use serde_json::json;
+
 use tracing::{error, trace};
 use uuid::Uuid;
 
 use crate::{
     data_types::{DataType, ProtocolString, VarInt},
-    packet::ServerBound,
-    ProtocolError,
+    packet, ProtocolError,
 };
 
 // 1. C→S: Handshake with Next State set to 2 (login)
@@ -21,15 +20,15 @@ use crate::{
 // 8. S→C: Login Success
 
 #[derive(Debug)]
-pub enum LoginClientBound {
+pub enum ClientBound {
     Disconnect(Disconnect),
     EncryptionRequest(EncryptionRequest),
     LoginSuccess(LoginSuccess),
     SetCompression(SetCompression),
-    LoginPluginRequest(LoginPluginRequest),
+    LoginPluginRequest(PluginRequest),
 }
 
-impl LoginClientBound {
+impl ClientBound {
     pub fn write_to<W>(&self, writer: &mut W) -> Result<usize, ProtocolError>
     where
         W: Write,
@@ -52,33 +51,21 @@ impl LoginClientBound {
         }
     }
 
-    pub fn from_request(request: ServerBound) -> Result<Self, ProtocolError> {
-        match request {
-            ServerBound::Login(req) => match req {
-                LoginServerBound::LoginStart(req) => {
-                    // Ok(Self::Disconnect(Disconnect {
-                    //     reason: ProtocolString::from(
-                    //         json!({
-                    //             "text": "Disconnected cuz yeah"
-                    //         })
-                    //         .to_string(),
-                    //     ),
-                    // }))
-
-                    Ok(Self::LoginSuccess(LoginSuccess {
-                        uuid: req.player_uuid.unwrap(),
-                        username: req.name,
-                        number_of_properties: VarInt(0),
-                        property: vec![],
-                    }))
-                }
-                LoginServerBound::EncryptionResponse(_) => Err(ProtocolError::Unimplemented),
+    pub fn from_request(request: packet::ServerBound) -> Result<Self, ProtocolError> {
+        if let packet::ServerBound::Login(req) = request {
+            match req {
+                ServerBound::LoginStart(req) => Ok(Self::LoginSuccess(LoginSuccess {
+                    // TODO dont do this
+                    uuid: req.player_uuid.unwrap_or_default(),
+                    username: req.name,
+                    number_of_properties: VarInt(0),
+                    property: vec![],
+                })),
                 _ => Err(ProtocolError::Unimplemented),
-            },
-            _ => {
-                error!("why would the request be in another state? should be impossible.");
-                Err(ProtocolError::Internal)
             }
+        } else {
+            error!("why would the request be in another state? should be impossible.");
+            Err(ProtocolError::Internal)
         }
     }
 }
@@ -89,7 +76,7 @@ pub struct Disconnect {
 }
 
 impl Disconnect {
-    pub fn new(reason: ProtocolString) -> Self {
+    pub const fn new(reason: ProtocolString) -> Self {
         Self { reason }
     }
 
@@ -99,7 +86,7 @@ impl Disconnect {
     {
         let mut response = vec![];
         let packet_id = VarInt(0x00);
-        let packet_length = VarInt((packet_id.size() + self.reason.size()) as i32);
+        let packet_length = VarInt(i32::try_from(packet_id.size() + self.reason.size())?);
 
         packet_length.write_to(&mut response)?;
         packet_id.write_to(&mut response)?;
@@ -121,6 +108,7 @@ pub struct EncryptionRequest {
 }
 
 #[derive(Debug)]
+#[allow(clippy::module_name_repetitions)]
 pub struct LoginSuccess {
     pub uuid: Uuid,
     pub username: ProtocolString,
@@ -153,12 +141,9 @@ impl LoginSuccess {
         let mut response = vec![];
         let packet_id = VarInt(0x02);
         let uuid = Uuid::as_bytes(&self.uuid);
-        let packet_length = VarInt(
-            (packet_id.size()
-                + uuid.len()
-                + self.username.size()
-                + self.number_of_properties.size()) as i32,
-        );
+        let packet_length = VarInt(i32::try_from(
+            packet_id.size() + uuid.len() + self.username.size() + self.number_of_properties.size(),
+        )?);
 
         packet_length.write_to(&mut response)?;
         packet_id.write_to(&mut response)?;
@@ -180,22 +165,23 @@ pub struct SetCompression {
 }
 
 #[derive(Debug)]
-pub struct LoginPluginRequest {
+pub struct PluginRequest {
     message_id: VarInt,
     channel: ProtocolString,
     data: Vec<u8>,
 }
 
 #[derive(Debug)]
-pub enum LoginServerBound {
+pub enum ServerBound {
     LoginStart(LoginStart),
     EncryptionResponse(EncryptionResponse),
     LoginPluginResponse(LoginPluginResponse),
 }
 
-impl LoginServerBound {
+impl ServerBound {
     pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, ProtocolError> {
-        let length = VarInt::read_from(reader)?.0 as usize;
+        let length = VarInt::read_from(reader)?;
+        let length = usize::try_from(length.0)?;
 
         let packet_id = VarInt::read_from(reader)?;
         trace!("Login Packet ID: {:?}", packet_id);
@@ -207,9 +193,7 @@ impl LoginServerBound {
         let mut cursor = Cursor::new(&mut buffer);
 
         match packet_id {
-            VarInt(0x00) => Ok(LoginServerBound::LoginStart(LoginStart::read_from(
-                &mut cursor,
-            )?)),
+            VarInt(0x00) => Ok(Self::LoginStart(LoginStart::read_from(&mut cursor)?)),
             VarInt(0x01) => {
                 trace!("unimplemented");
                 Err(ProtocolError::Unimplemented)
@@ -225,6 +209,7 @@ impl LoginServerBound {
 }
 
 #[derive(Debug)]
+#[allow(clippy::module_name_repetitions)]
 pub struct LoginStart {
     pub name: ProtocolString,
     pub has_player_uuid: bool,
@@ -272,6 +257,7 @@ pub struct EncryptionResponse {
 }
 
 #[derive(Debug)]
+#[allow(clippy::module_name_repetitions)]
 pub struct LoginPluginResponse {
     message_id: VarInt,
     successful: bool,

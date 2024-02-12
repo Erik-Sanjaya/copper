@@ -50,7 +50,8 @@ impl ServerStatus<'_> {
                 online: 105,
                 sample: vec![ServerPlayersSample {
                     name: "thinkofdeath",
-                    id: Uuid::parse_str("4566e69f-c907-48ee-8d71-d7ba5aa00d20").unwrap(),
+                    // TODO dont do this too
+                    id: Uuid::parse_str("4566e69f-c907-48ee-8d71-d7ba5aa00d20").unwrap_or_default(),
                 }],
             },
             description: ServerDescription {
