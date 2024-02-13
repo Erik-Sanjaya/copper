@@ -7,8 +7,11 @@ mod play;
 mod server_status;
 mod status;
 
+use std::{net::SocketAddr, ops::Index};
+
 use thiserror::Error;
-use tracing::error;
+use tokio::sync::mpsc::channel;
+use tracing::{error, info, trace};
 
 #[derive(Debug, Error)]
 pub enum ProtocolError {
@@ -85,11 +88,35 @@ async fn main() -> anyhow::Result<()> {
     // }
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:25565").await?;
+    let mut clients = vec![];
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<SocketAddr>(32);
+
     loop {
-        let (stream, addr) = listener.accept().await?;
-        tokio::spawn(async move {
-            client::Client::new(stream, addr).handle().await;
-        })
-        .await?;
+        tokio::select! {
+            res = listener.accept() => {
+                match res {
+                    Ok((stream, addr)) => {
+                        clients.push(addr);
+                        let tx = tx.clone();
+                        tokio::spawn(async move {
+                            info!("Client ({addr}) has connected.");
+                            client::Client::new(stream, addr, tx).handle().await;
+                        })
+                        .await?;
+                    },
+                    Err(e) => {
+                        error!("{e:?}");
+
+                    }
+                }
+            }
+
+            disconnect_addr = rx.recv() => {
+                let disconnect_addr = disconnect_addr.expect("recv fail");
+                info!("Client ({disconnect_addr}) has disconencted.");
+                clients.swap_remove(clients.iter().position(|a| *a == disconnect_addr).expect("addr should be inside, unless its disconnected"));
+            }
+        }
+        trace!("List of clients: {clients:?}");
     }
 }

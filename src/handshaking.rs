@@ -52,6 +52,7 @@ pub enum NextState {
 }
 
 #[derive(Debug)]
+#[allow(unused)]
 pub struct Handshake {
     protocol_version: VarInt,
     server_address: ProtocolString,

@@ -2,12 +2,12 @@ use std::io::{Cursor, Read, Write};
 
 use byteorder::ReadBytesExt;
 
-use tracing::{error, trace};
+use tracing::trace;
 use uuid::Uuid;
 
 use crate::{
     data_types::{DataType, ProtocolString, VarInt},
-    packet::{self, Decodable},
+    packet::Decodable,
     ProtocolError,
 };
 

@@ -24,10 +24,16 @@ pub struct Client {
     state: State,
     buffer: VecDeque<u8>,
     connected: bool,
+    packet_queue: VecDeque<packet::ClientBound>,
+    disconnect_tx: tokio::sync::mpsc::Sender<SocketAddr>,
 }
 
 impl Client {
-    pub fn new(stream: TcpStream, addr: SocketAddr) -> Self {
+    pub fn new(
+        stream: TcpStream,
+        addr: SocketAddr,
+        tx: tokio::sync::mpsc::Sender<SocketAddr>,
+    ) -> Self {
         Self {
             addr,
             stream: BufReader::new(stream),
@@ -35,6 +41,8 @@ impl Client {
             // vecdeque because the bytes are one time read only, so it's fine if its not contiguous for cache hit
             buffer: VecDeque::new(),
             connected: true,
+            packet_queue: VecDeque::new(),
+            disconnect_tx: tx,
         }
     }
 
@@ -42,7 +50,6 @@ impl Client {
     // all the calls to the other methods come from this
     // one anyway
     pub async fn handle(&mut self) {
-        info!("Client connected from: {:?}", self.addr);
         trace!("Client Stream: {:?}", self.stream);
 
         while self.connected {
@@ -54,14 +61,12 @@ impl Client {
 
             if let Err(e) = self.drain_stream().await {
                 if e.kind() != ErrorKind::WouldBlock {
-                    // trace!("Would block.");
-                    // tokio::task::yield_now();
                     error!("Error from draining stream: {e:?}");
                     panic!("Error from draining stream: {e:?}");
                 }
             }
 
-            if !self.buffer.is_empty() {
+            while !self.buffer.is_empty() {
                 let packet = match packet::ServerBound::parse_packet(&mut self.buffer, &self.state)
                 {
                     Ok(packet) => packet,
@@ -70,13 +75,22 @@ impl Client {
                         panic!();
                     }
                 };
-                self.reply(packet).await;
+
+                self.create_reply(packet);
+            }
+
+            while !self.packet_queue.is_empty() {
+                self.write_packet().await;
             }
         }
+
+        // client has disconnected
+        self.disconnect_tx.send(self.addr).await;
     }
 
-    async fn reply(&mut self, packet: packet::ServerBound) {
-        let reply_packet: Option<packet::ClientBound> = match packet {
+    /// Create packet(s) and then push it to `self.packet_queue`
+    fn create_reply(&mut self, packet_to_write: packet::ServerBound) {
+        let reply_packet: Option<packet::ClientBound> = match packet_to_write {
             packet::ServerBound::Handshake(req) => {
                 info!("Handshake Packet Incoming: {:?}", req);
                 if let handshaking::ServerBound::Handshake(handshake) = req {
@@ -154,6 +168,14 @@ impl Client {
             }
         };
 
+        if let Some(reply_packet) = reply_packet {
+            self.packet_queue.push_back(reply_packet);
+        }
+    }
+
+    async fn write_packet(&mut self) {
+        let reply_packet = self.packet_queue.pop_front();
+
         let Some(reply_packet) = reply_packet else {
             return;
         };
@@ -177,10 +199,6 @@ impl Client {
         debug!("Packet written {bytes_written} byte(s)");
         trace!("Packet bytes: {reply_bytes:?}");
     }
-
-    // pub fn read_stream(&mut self) -> Result<packet::ServerBound, ProtocolError> {
-    //     packet::ServerBound::parse_packet(&mut self.buffer, &self.state)
-    // }
 
     /// Drain the whole stream and move it to the client's internal buffer
     async fn drain_stream(&mut self) -> Result<(), std::io::Error> {

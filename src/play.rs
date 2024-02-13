@@ -1,9 +1,15 @@
 use crate::ProtocolError;
 
 #[derive(Debug)]
-pub struct ServerBound;
+pub enum ServerBound {
+    BundleDelimiter(BundleDelimiter),
+}
+
 #[derive(Debug)]
-pub struct ClientBound;
+struct BundleDelimiter;
+
+#[derive(Debug)]
+pub enum ClientBound {}
 
 impl ClientBound {
     pub fn from_request(request: ServerBound) -> Result<Self, ProtocolError> {
