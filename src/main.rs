@@ -88,7 +88,7 @@ async fn main() -> anyhow::Result<()> {
     loop {
         let (stream, addr) = listener.accept().await?;
         tokio::spawn(async move {
-            client::Client::new(stream, addr).handle();
+            client::Client::new(stream, addr).handle().await;
         })
         .await?;
     }

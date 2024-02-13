@@ -2,6 +2,9 @@ use std::collections::VecDeque;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::io::BufReader;
 use tokio::net::TcpStream;
 use tracing::debug;
 use tracing::error;
@@ -17,7 +20,7 @@ use crate::State;
 
 pub struct Client {
     addr: SocketAddr,
-    stream: TcpStream,
+    stream: BufReader<TcpStream>,
     state: State,
     buffer: VecDeque<u8>,
     connected: bool,
@@ -27,7 +30,7 @@ impl Client {
     pub fn new(stream: TcpStream, addr: SocketAddr) -> Self {
         Self {
             addr,
-            stream,
+            stream: BufReader::new(stream),
             state: State::Handshaking,
             // vecdeque because the bytes are one time read only, so it's fine if its not contiguous for cache hit
             buffer: VecDeque::new(),
@@ -38,7 +41,7 @@ impl Client {
     // i think this one is allowed to consume the client
     // all the calls to the other methods come from this
     // one anyway
-    pub fn handle(&mut self) {
+    pub async fn handle(&mut self) {
         info!("Client connected from: {:?}", self.addr);
         trace!("Client Stream: {:?}", self.stream);
 
@@ -49,7 +52,7 @@ impl Client {
             // that way the program wont just keep on yielding the drain
             // and have nothing else to do
 
-            if let Err(e) = self.drain_stream() {
+            if let Err(e) = self.drain_stream().await {
                 if e.kind() != ErrorKind::WouldBlock {
                     // trace!("Would block.");
                     // tokio::task::yield_now();
@@ -67,12 +70,12 @@ impl Client {
                         panic!();
                     }
                 };
-                self.reply(packet);
+                self.reply(packet).await;
             }
         }
     }
 
-    fn reply(&mut self, packet: packet::ServerBound) {
+    async fn reply(&mut self, packet: packet::ServerBound) {
         let reply_packet: Option<packet::ClientBound> = match packet {
             packet::ServerBound::Handshake(req) => {
                 info!("Handshake Packet Incoming: {:?}", req);
@@ -163,7 +166,7 @@ impl Client {
             }
         };
 
-        let bytes_written = match self.stream.try_write(&reply_bytes) {
+        let bytes_written = match self.stream.write(&reply_bytes).await {
             Ok(bytes_written) => bytes_written,
             Err(e) => {
                 error!("Error in try_write: {e:?}");
@@ -180,11 +183,11 @@ impl Client {
     // }
 
     /// Drain the whole stream and move it to the client's internal buffer
-    fn drain_stream(&mut self) -> Result<(), std::io::Error> {
+    async fn drain_stream(&mut self) -> Result<(), std::io::Error> {
         trace!("draining stream");
         let mut buffer: Vec<u8> = vec![0; 128];
 
-        match self.stream.try_read(&mut buffer) {
+        match self.stream.read(&mut buffer).await {
             Ok(bytes_read) => {
                 trace!("Bytes read: {:?}", bytes_read);
                 if bytes_read == 0 {
